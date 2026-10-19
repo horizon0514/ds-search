@@ -1,0 +1,31 @@
+# Build outputs
+/build/
+/.mygo/
+/dist/
+mygo_windows_*.syso
+/ds-search
+*.app/
+*.dmg
+*.zip
+*.exe
+*.test
+*.out
+
+# Test output (screenshots rendered by TestScreenshots; a few live in docs/screenshots)
+/shots/
+
+# Secrets
+.env
+.env.*
+api-key
+api-key.tmp
+*.pem
+*.p12
+
+# Editors, OS, tooling
+.DS_Store
+._*
+.idea/
+.vscode/
+*.swp
+/.agents/

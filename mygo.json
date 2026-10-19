@@ -1,0 +1,9 @@
+{
+  "name": "DS Search",
+  "identifier": "dev.horizon.dssearch",
+  "version": "0.2.1",
+  "out": "build",
+  "macos": {
+    "infoPlist": { "LSUIElement": true }
+  }
+}
