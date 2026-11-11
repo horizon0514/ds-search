@@ -220,9 +220,11 @@ func (a *app) search() {
 			if seq != a.seq {
 				return
 			}
+			before := a.wide()
 			a.searching, a.took = false, took
 			if err != nil {
 				a.searchErr = errText(err)
+				a.relayout(before)
 				return
 			}
 			if len(rs) > 0 {
@@ -233,9 +235,14 @@ func (a *app) search() {
 			a.expanded = len(rs) < pageSize
 			a.chosen = -1
 			a.listScroll.Y = 0
+			a.relayout(before)
 			if len(a.results) > 0 {
 				a.choose(0)
-				a.listFocus.Focus() // ↑↓ ↵ 空格 on the results; typing goes back to the query
+				if a.cfg.AI && !a.cfg.Sources {
+					a.focusChat = true // the answer: it is what the panel shows
+				} else {
+					a.listFocus.Focus() // ↑↓ ↵ 空格 on the results; typing goes back to the query
+				}
 			}
 			if a.cfg.AI && len(rs) > 0 {
 				a.startChat()
@@ -333,9 +340,6 @@ func (a *app) rows() int {
 func (a *app) showingHistory() bool {
 	return strings.TrimSpace(a.query) == "" && !a.searching
 }
-
-// toggleAI (⇥ on the results) opens the conversation, or closes it.
-func (a *app) toggleAI() { a.expand(!a.cfg.AI) }
 
 // read opens the chosen result in the reader.
 func (a *app) read() {

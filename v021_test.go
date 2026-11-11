@@ -305,11 +305,11 @@ func TestSplit(t *testing.T) {
 	if w := splitWidth(0, 1180); math.Abs(float64(w-400)) > 0.5 {
 		t.Errorf("default: %v", w)
 	}
-	if w := splitWidth(0.1, 1180); w != minLeft {
-		t.Errorf("min left: %v", w)
+	if w := splitWidth(0.1, 1180); w != minSide {
+		t.Errorf("min side: %v", w)
 	}
-	if w := splitWidth(0.95, 1180); w != maxLeft {
-		t.Errorf("max left: %v", w) // the summary keeps its column
+	if w := splitWidth(0.95, 1180); w != maxSide {
+		t.Errorf("max side: %v", w) // the answer keeps its column
 	}
 	if w := splitWidth(0.5, 500); w > 250 || w < 160 {
 		t.Errorf("narrow: %v", w)
@@ -330,17 +330,18 @@ func TestSplit(t *testing.T) {
 	x, y := r.X+r.W/2, r.Y+r.H/2
 	tt.Press(x, y)
 	for i := 1; i <= 10; i++ {
-		tt.Move(x+float32(i)*12, y)
+		tt.Move(x-float32(i)*12, y)
 	}
-	tt.Release(x+120, y)
+	tt.Release(x-120, y)
 	tt.Frame()
-	// Dragged wide, the sources stop at maxLeft: the answer stays the
-	// panel's headline however the panes were once shared out.
-	if l := a.leftWidth(); l > maxLeft {
-		t.Errorf("dragged 120 right: left %v, max %v (split %v)", l, maxLeft, a.cfg.Split)
+	// Dragged wide (leftward: the drawer is on the right), the sources
+	// stop at maxSide: the answer stays the panel's headline however the
+	// panes were once shared out.
+	if w := a.sideWidth(); w > maxSide {
+		t.Errorf("dragged 120 left: side %v, max %v (split %v)", w, maxSide, a.cfg.Split)
 	}
-	if l := a.leftWidth(); l < maxLeft-120 {
-		t.Errorf("dragged 120 right: left %v", l)
+	if w := a.sideWidth(); w < maxSide-120 {
+		t.Errorf("dragged 120 left: side %v", w)
 	}
 	if saved == 0 {
 		t.Error("split not saved")
@@ -350,12 +351,12 @@ func TestSplit(t *testing.T) {
 	x, y = r.X+r.W/2, r.Y+r.H/2
 	tt.Press(x, y)
 	for i := 1; i <= 10; i++ {
-		tt.Move(x-float32(i)*12, y)
+		tt.Move(x+float32(i)*12, y)
 	}
-	tt.Release(x-120, y)
+	tt.Release(x+120, y)
 	tt.Frame()
-	if l := a.leftWidth(); l < maxLeft-130 || l > maxLeft-110 {
-		t.Errorf("dragged 120 left: left %v (split %v)", l, a.cfg.Split)
+	if w := a.sideWidth(); w < maxSide-130 || w > maxSide-110 {
+		t.Errorf("dragged 120 right: side %v (split %v)", w, a.cfg.Split)
 	}
 	r, _ = tt.Find("分隔条")
 	tt.ClickAt(r.X+r.W/2, y)

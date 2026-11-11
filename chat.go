@@ -279,7 +279,7 @@ func (a *app) setLabel(s int) string {
 	return fmt.Sprintf("第%d轮：%s", s+1, trim(q, 12))
 }
 
-// showSet shows source list s on the left.
+// showSet shows source list s in the drawer.
 func (a *app) showSet(s int) {
 	if s < 0 || (s > 0 && (s >= len(a.turns) || a.turns[s].set != s)) {
 		return
@@ -325,6 +325,7 @@ func (a *app) cite(t *turn, dest string) {
 	if n < 1 || n > len(t.sources) {
 		return
 	}
+	a.openSources() // the source is in the drawer: bring it in
 	u := t.sources[n-1].URL
 	a.showSet(t.set)
 	for i, r := range a.results {
@@ -351,13 +352,14 @@ func (a *app) citeNth(n int) {
 	}
 }
 
-// expand opens the conversation on the right, starting it when the
-// search has none yet.
-func (a *app) expand(on bool) {
+// summarize turns the answer on or off: on, a search is read as its
+// summary, the sources a drawer away; off, the results alone show.
+func (a *app) summarize(on bool) {
 	if a.cfg.AI != on {
+		before := a.wide()
 		a.cfg.AI = on
 		a.changed(a.cfg)
-		a.resize(on)
+		a.relayout(before)
 	}
 	if on && a.chatFor != a.searchKey() && len(a.page1) > 0 && !a.searching {
 		a.startChat()
@@ -369,6 +371,56 @@ func (a *app) expand(on bool) {
 	} else {
 		a.input.Focus()
 	}
+}
+
+// toggleSummary is the ✨ chip, and ⇧⇥ with the sources closed.
+func (a *app) toggleSummary() { a.summarize(!a.cfg.AI) }
+
+// wide is whether the panel is at its wide width: only while the sources
+// sit beside the answer, and there are sources to show.
+func (a *app) wide() bool {
+	return a.cfg.AI && a.cfg.Sources && len(a.results) > 0 && !a.showingHistory() && a.searchErr == ""
+}
+
+// relayout resizes the panel when its width changed: only the sources
+// beside the answer ask for the wide one.
+func (a *app) relayout(before bool) {
+	if w := a.wide(); w != before {
+		a.resize(w)
+	}
+}
+
+// openSources shows the sources drawer, keeping the keyboard where it is:
+// a citation clicked in the answer reveals the source it cites.
+func (a *app) openSources() {
+	if a.cfg.Sources || !a.cfg.AI {
+		return
+	}
+	before := a.wide()
+	a.cfg.Sources = true
+	a.changed(a.cfg)
+	a.relayout(before)
+}
+
+// showSources opens the drawer and puts the keyboard on the list.
+func (a *app) showSources() {
+	a.openSources()
+	if len(a.results) > 0 && !a.showingHistory() {
+		a.focusList = true
+	}
+}
+
+// hideSources closes the drawer (⇧⇥): the answer is alone again, and the
+// keyboard goes back to it.
+func (a *app) hideSources() {
+	if !a.cfg.Sources {
+		return
+	}
+	before := a.wide()
+	a.cfg.Sources = false
+	a.changed(a.cfg)
+	a.relayout(before)
+	a.focusChat = true
 }
 
 func trim(s string, n int) string {

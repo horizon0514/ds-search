@@ -10,9 +10,10 @@ import (
 // the app's data folder (~/Library/Application Support/DS Search). The
 // API key is never in it (keystore.go).
 type config struct {
-	Shortcut string `json:"shortcut"`        // global shortcut, e.g. "Alt+Space"
-	AI       bool   `json:"ai"`              // the conversation open on the right: a search summarizes
-	Model    string `json:"model,omitempty"` // chat model
+	Shortcut string `json:"shortcut"`          // global shortcut, e.g. "Alt+Space"
+	AI       bool   `json:"ai"`                // the conversation open on the right: a search summarizes
+	Sources  bool   `json:"sources,omitempty"` // the sources drawer beside the summary, closed by default
+	Model    string `json:"model,omitempty"`   // chat model
 	// Billing: warn under this balance (¥), and over this month's budget (¥, 0 for none).
 	LowBalance    float64  `json:"lowBalance"`
 	MonthlyBudget float64  `json:"monthlyBudget,omitempty"`

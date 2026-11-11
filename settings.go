@@ -124,10 +124,10 @@ func (a *app) message(c *ui.Context, k ink) {
 }
 
 func (a *app) tabGeneral(c *ui.Context, k ink) {
-	section(c, k, "AI 总结", "默认每次搜索都先搜再总结：面板两栏，右边是带 [n] 引用的总结，左边是它读的来源。", func() {
+	section(c, k, "AI 总结", "默认每次搜索都先搜再总结：面板上只有带 [n] 引用的总结，来源收在右侧抽屉里，按 ⇥ 或点「来源」展开。", func() {
 		on := a.cfg.AI
 		option(c, k, "搜索后自动 AI 总结", "关闭后只显示搜索结果，按 ⇥ 才展开对话（总结也会在那时才开始，不会白花钱）。", &on, func() {
-			a.expand(on) // it saves the config, resizes the panel, and summarizes what is on screen
+			a.summarize(on) // it saves the config, resizes the panel, and summarizes what is on screen
 		})
 	})
 	section(c, k, "外观", "", func() {

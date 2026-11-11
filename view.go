@@ -14,13 +14,14 @@ import (
 	"github.com/egoist/mygo/ui/markdown"
 )
 
-// The panel: the results beside the AI conversation, which is the
-// default, so a search is read as its summary. With the conversation
-// closed (⇧⇥) the results are all there is.
+// The panel: the answer. A search is read as its summary, and the sources
+// it read are a drawer on the right (⇥), closed by default, so the answer
+// is what the panel is. With the answer off (设置) the results are all
+// there is.
 const (
 	panelWidth, panelHeight = 720, 560
 	expandedWidth           = 1180
-	leftWidth               = 400 // the sources, a sidebar beside the summary
+	sideDefault             = 400 // the sources drawer's width beside the answer
 )
 
 var (
@@ -153,53 +154,60 @@ func (a *app) searchPage(c *ui.Context, k ink) {
 			})
 		}
 
-		if a.cfg.AI {
+		// The answer is the panel. The sources are a drawer on the right,
+		// closed by default: the list a search read is one key away (⇥),
+		// not the thing the panel is for. With the answer off, or with
+		// nothing to answer yet, the search's own list is the panel.
+		switch {
+		case !a.cfg.AI, a.showingHistory(), a.searchErr != "":
+			a.resultsPane(c, k)
+		case a.wide():
 			panes := ui.Row(c.Key("panes")).Grow(1).MinHeight(0).AlignItems(ui.Stretch)
 			if w := panes.Bounds().W; w > 0 {
 				a.panesW = w
 			}
 			panes.Children(func() {
-				// The sources are a sidebar: the tint sets them apart from
-				// the summary, which is the panel's main area.
-				ui.Column(c.Key("left")).Width(a.leftWidth()).MinHeight(0).Background(k.side).Children(func() {
+				a.chatPane(c.Key("chat"), k)
+				a.splitter(c.Key("split"), k)
+				// The tint sets the sources apart from the answer, which
+				// stays the panel's main area.
+				ui.Column(c.Key("side")).Width(a.sideWidth()).MinHeight(0).Background(k.side).Children(func() {
 					a.setChips(c.Key("chips"), k)
 					a.resultsPane(c, k)
 				})
-				a.splitter(c.Key("split"), k)
-				a.chatPane(c.Key("chat"), k)
 			})
-		} else {
-			a.resultsPane(c, k)
+		default:
+			a.chatPane(c.Key("chat"), k)
 		}
 		ui.Divider(c)
 		a.footer(c, k)
 	})
 }
 
-// The sources sidebar is at least minLeft and at most maxLeft wide, the
-// summary at least minRight. The cap is what keeps the summary the
+// The sources drawer is at least minSide and at most maxSide wide, the
+// answer at least minMain. The cap is what keeps the summary the
 // headline: a share dragged (or remembered) long ago, back when the
 // results were all there was, must not eat the answer's column.
 const (
-	minLeft, maxLeft, minRight = 280, 460, 340
+	minSide, maxSide, minMain = 280, 460, 340
 )
 
-// splitWidth is the left pane's width, of panes w wide, at split (the
-// left's share; 0 for the default).
+// splitWidth is the drawer's width, of panes w wide, at split (its share;
+// 0 for the default).
 func splitWidth(split, w float32) float32 {
 	if w <= 0 {
-		return leftWidth
+		return sideDefault
 	}
 	if split <= 0 {
-		split = float32(leftWidth) / expandedWidth
+		split = float32(sideDefault) / expandedWidth
 	}
-	// The summary keeps its column: the sidebar is capped at maxLeft, and on
+	// The answer keeps its column: the drawer is capped at maxSide, and on
 	// a panel too narrow for both minimums the two share it out.
-	lo, hi := min(minLeft, w/2), max(min(minLeft, w/2), min(maxLeft, w-minRight))
-	return min(max(min(split*w, w-minRight), lo), hi)
+	lo, hi := min(minSide, w/2), max(min(minSide, w/2), min(maxSide, w-minMain))
+	return min(max(min(split*w, w-minMain), lo), hi)
 }
 
-func (a *app) leftWidth() float32 {
+func (a *app) sideWidth() float32 {
 	w := a.panesW
 	if w == 0 {
 		w = float32(widthFor(a.cfg, true, 1<<20))
@@ -207,8 +215,9 @@ func (a *app) leftWidth() float32 {
 	return splitWidth(float32(a.cfg.Split), w)
 }
 
-// splitter is the line between the panes: drag it to share the width out
-// anew, double-click it for the default. The share is remembered.
+// splitter is the line between the answer and the drawer: drag it to share
+// the width out anew, double-click it for the default. The share is
+// remembered. Dragging left widens the drawer.
 func (a *app) splitter(c *ui.Context, k ink) {
 	line := k.line
 	h := ui.Box(c).Width(7).Margin(0, -3).Cursor(ui.CursorResizeColumn).Label("分隔条")
@@ -218,7 +227,7 @@ func (a *app) splitter(c *ui.Context, k ink) {
 	if dx, _, ok := h.Dragged(); ok && a.panesW > 0 {
 		line = k.link
 		if dx != 0 {
-			a.cfg.Split = float64(splitWidth(float32(a.cfg.Split), a.panesW)+dx) / float64(a.panesW)
+			a.cfg.Split = float64(splitWidth(float32(a.cfg.Split), a.panesW)-dx) / float64(a.panesW)
 			a.cfg.Split = float64(splitWidth(float32(a.cfg.Split), a.panesW)) / float64(a.panesW)
 		}
 	}
@@ -278,7 +287,7 @@ func (a *app) resultsPane(c *ui.Context, k ink) {
 	}
 }
 
-// aiChip opens and closes the AI conversation: ⇥ opens it, ⇧⇥ closes it.
+// aiChip turns the answer on and off: on, a search is read as its summary.
 func (a *app) aiChip(c *ui.Context, k ink) {
 	bg, fg := ui.Transparent, k.faint
 	if a.cfg.AI {
@@ -287,7 +296,7 @@ func (a *app) aiChip(c *ui.Context, k ink) {
 	// The chip stays called 对话: 总结 is the answer's own heading, which
 	// only shows while this pane is open.
 	ui.Row(c).Gap(4).Padding(4, 9).Radius(20).Background(bg).AlignItems(ui.Center).Cursor(ui.CursorPointer).
-		Tooltip("AI 总结  ⇥ 打开 / ⇧⇥ 收起").Label("AI 对话").OnClick(a.toggleAI).Children(func() {
+		Tooltip("AI 总结 · 搜索后自动；关掉只看搜索结果").Label("AI 对话").OnClick(a.toggleSummary).Children(func() {
 		ui.Icon(c, iconSparkles).FontSize(13).TextColor(fg)
 		ui.Text(c, "AI 对话").FontSize(12).FontWeight(550).TextColor(fg)
 	})
@@ -488,13 +497,15 @@ func (a *app) footer(c *ui.Context, k ink) {
 	esc := "隐藏"
 	switch {
 	case a.cfg.AI && a.chatFocused:
-		right = hint("↵", "追问", "⇥", "结果", cmdKey()+"N", "新对话", "esc", esc)
+		right = hint("↵", "追问", "⇥", "来源", cmdKey()+"N", "新对话", "esc", esc)
 	case a.listFocused && len(a.results) > 0 && a.cfg.AI:
-		right = hint("↑↓", "选择", "↵", "打开", "空格", "预览", "⇥", "对话", "esc", esc)
+		right = hint("↑↓", "选择", "↵", "打开", "空格", "预览", "⇧⇥", "收起来源", "esc", esc)
 	case a.listFocused && len(a.results) > 0:
 		right = hint("↑↓", "选择", "↵", "打开", "空格", "预览", "⇥", "AI", "esc", "隐藏")
 	case a.showingHistory() && len(a.cfg.History) > 0:
 		right = hint("↑↓", "选择", "↵", "搜索", "esc", esc)
+	case len(a.results) > 0 && a.cfg.AI:
+		right = hint("↵", "搜索", "↓", "来源", "⇥", "对话", "esc", esc)
 	case len(a.results) > 0:
 		right = hint("↵", "搜索", "↓", "结果", "⇥", "AI", "esc", esc)
 	default:

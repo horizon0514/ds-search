@@ -109,9 +109,9 @@ var canned = []dsapi.Result{
 	{Title: "Go 1.27 新特性一览", URL: "https://example.cn/go127", Snippet: "Go 1.27 带来了新的迭代器、泛型改进……", SiteName: "示例博客", RerankScore: 1.1, Authority: 1},
 }
 
-// A search summarizes by default: Enter asks, and the answer arrives on
-// the right over the sources on the left. ⇧⇥ closes that pane, and then a
-// search costs nothing but the search.
+// A search summarizes by default: Enter asks, and the answer fills the
+// panel. The sources are a drawer, closed until asked for; ⇧⇥ closes it,
+// then the answer, and with both closed a search costs only the search.
 func TestSearchSummarizesByDefault(t *testing.T) {
 	f := &fake{results: canned, answer: []string{"Go 1.27 于 8 月发布", " [1]。"}}
 	a, opened := testApp(f)
@@ -120,13 +120,15 @@ func TestSearchSummarizesByDefault(t *testing.T) {
 	tt := ui.NewTester(a.view, expandedWidth, panelHeight)
 	tt.Type("go 1.27")
 	tt.Key(0, ui.KeyEnter)
-	if len(f.queries) != 1 || !tt.HasText("Go 1.27 Release Notes") {
+	// The answer came; the sources did not. They are a drawer, closed by
+	// default, so the summary is what the panel shows.
+	if len(f.queries) != 1 || !tt.HasText("AI 总结") || !tt.HasText("来源 · 2 条") {
 		t.Fatalf("queries %v, texts %q", f.queries, tt.Texts())
 	}
-	if !tt.HasText("优质") || !tt.HasText("权威") {
-		t.Errorf("no quality badges: %q", tt.Texts())
+	if a.cfg.Sources || tt.HasText("Go 1.27 Release Notes") || tt.HasText("优质") {
+		t.Errorf("the sources are not a closed drawer: %v %q", a.cfg.Sources, tt.Texts())
 	}
-	// The summary came with the search, and the sources show what it read.
+	// The summary came with the search, and cites what it read.
 	if len(f.chats) != 1 || len(a.turns) != 1 || a.turns[0].busy {
 		t.Fatalf("searched without a summary: chats %d turns %d", len(f.chats), len(a.turns))
 	}
@@ -136,8 +138,16 @@ func TestSearchSummarizesByDefault(t *testing.T) {
 	if got := citeLinks(a.turns[0].answer, len(a.turns[0].sources)); !strings.Contains(got, "[[1]](cite:1)") {
 		t.Errorf("citations: %s", got)
 	}
-	if !tt.HasText("AI 总结") || !tt.HasText("来源 · 2 条") {
-		t.Errorf("no summary and source headings: %q", tt.Texts())
+	if !tt.Focused("追问") {
+		t.Errorf("the answer does not have the keyboard: %q", tt.Texts())
+	}
+	// ⇥ brings the sources in, with the keyboard on the list.
+	tt.Key(0, ui.KeyTab)
+	if !a.cfg.Sources || !tt.Focused("搜索结果") {
+		t.Fatalf("⇥: drawer %v, focused %v", a.cfg.Sources, tt.Focused("搜索结果"))
+	}
+	if !tt.HasText("Go 1.27 Release Notes") || !tt.HasText("优质") || !tt.HasText("权威") {
+		t.Errorf("the drawer, yet no sources: %q", tt.Texts())
 	}
 	tt.Key(0, ui.KeyDown)
 	if a.chosen != 1 {
@@ -147,23 +157,20 @@ func TestSearchSummarizesByDefault(t *testing.T) {
 	if len(*opened) != 1 || (*opened)[0] != canned[1].URL || len(f.queries) != 1 {
 		t.Errorf("opened %v, queries %v", *opened, f.queries)
 	}
-	// ⇥ is the conversation, ⇥ again the sources, with nothing spent twice.
+	// ⇥ on the list is the answer again, which stays open beside it.
 	tt.Key(0, ui.KeyTab)
-	if !tt.Focused("追问") {
-		t.Fatalf("Tab did not focus the follow-up box")
+	if !a.cfg.Sources || !tt.Focused("追问") || len(f.chats) != 1 {
+		t.Errorf("⇥ on the sources: drawer %v, follow-up %v, chats %d", a.cfg.Sources, tt.Focused("追问"), len(f.chats))
 	}
-	tt.Key(0, ui.KeyTab)
-	if !tt.Focused("搜索结果") {
-		t.Error("Tab in the conversation did not go to the results")
+	// ⇧⇥ closes the sources; the answer stays and takes the keyboard.
+	tt.Key(ui.Shift, ui.KeyTab)
+	if a.cfg.Sources || !a.cfg.AI || !tt.Focused("追问") {
+		t.Errorf("⇧⇥: drawer %v, answer %v", a.cfg.Sources, a.cfg.AI)
 	}
-	tt.Key(0, ui.KeyTab)
-	if !tt.Focused("追问") || len(f.chats) != 1 {
-		t.Errorf("Tab on the results: follow-up focused %v, chats %d", tt.Focused("追问"), len(f.chats))
-	}
-	// ⇧⇥ closes the conversation: the results are all there is again.
+	// Again: with the sources closed, it closes the answer too.
 	tt.Key(ui.Shift, ui.KeyTab)
 	tt.SetSize(panelWidth, panelHeight)
-	if a.cfg.AI || len(expanded) != 1 || expanded[0] {
+	if a.cfg.AI || len(expanded) != 2 || !expanded[0] || expanded[1] {
 		t.Errorf("⇧⇥: AI %v resized %v", a.cfg.AI, expanded)
 	}
 	chats := len(f.chats)
@@ -181,6 +188,38 @@ func TestSearchSummarizesByDefault(t *testing.T) {
 	}
 	if !slices.Contains(a.cfg.History, "go 1.27") {
 		t.Errorf("history %v", a.cfg.History)
+	}
+}
+
+// The sources are a drawer: a search leaves it closed, ↓ from the empty
+// follow-up box slides it in with the keyboard on the list, and ⇧⇥ puts
+// the answer back alone.
+func TestSourcesDrawer(t *testing.T) {
+	f := &fake{results: canned, answer: []string{"总结 [1]"}}
+	a, _ := testApp(f)
+	tt := ui.NewTester(a.view, expandedWidth, panelHeight)
+	tt.Type("go 1.27")
+	tt.Key(0, ui.KeyEnter)
+	if a.cfg.Sources || !tt.Focused("追问") || !tt.HasText("来源 · 2 条") {
+		t.Fatalf("after the search: drawer %v, focused %v", a.cfg.Sources, tt.Focused("追问"))
+	}
+	tt.Key(0, ui.KeyDown)
+	if !a.cfg.Sources || !tt.Focused("搜索结果") || a.chosen != 0 {
+		t.Fatalf("↓: drawer %v, focused %v, chosen %d", a.cfg.Sources, tt.Focused("搜索结果"), a.chosen)
+	}
+	if !tt.HasText("收起 ⇧⇥") {
+		t.Errorf("the drawer has no way to close: %q", tt.Texts())
+	}
+	tt.Key(ui.Shift, ui.KeyTab)
+	if a.cfg.Sources || !a.cfg.AI || !tt.Focused("追问") || tt.HasText("Go 1.27 Release Notes") {
+		t.Errorf("⇧⇥: drawer %v, answer %v, focused %v", a.cfg.Sources, a.cfg.AI, tt.Focused("追问"))
+	}
+	// A remembered open drawer does not widen the home screen: there are
+	// no sources to show until a search returns.
+	a.cfg.Sources, a.query = true, ""
+	tt.Frame()
+	if a.wide() || tt.HasText("收起 ⇧⇥") {
+		t.Errorf("history: wide %v, drawer still open", a.wide())
 	}
 }
 
@@ -238,13 +277,9 @@ func TestScreenshots(t *testing.T) {
 			a.spawn = func(fn func()) { fn() }
 			a.balBusy = true // no real balance in screenshots
 			a.cfg.History = []string{"DeepSeek V4 site:deepseek.com", "Go 1.27 release notes", "杭州 天气 after:2026-10-01", "mygo egoist"}
-			// The panel is as wide as the app opens it: the conversation
-			// is open by default, so most shots are the wide ones.
-			w := panelWidth
-			if a.cfg.AI {
-				w = expandedWidth
-			}
-			tt := ui.NewTester(a.view, w, panelHeight)
+			// The panel is as wide as the app opens it: the summary alone
+			// is the single column; the sources drawer makes it wide.
+			tt := ui.NewTester(a.view, widthFor(a.cfg, a.wide(), expandedWidth+48), panelHeight)
 			tt.SetScale(2)
 			tt.SetDark(dark)
 			setup(a, tt)
@@ -259,6 +294,11 @@ func TestScreenshots(t *testing.T) {
 	}
 	var cachedRS []dsapi.Result
 	var cachedAns string
+	openDrawer := func(a *app, tt *ui.Tester) {
+		a.openSources()
+		tt.SetSize(expandedWidth, panelHeight)
+		tt.Frame()
+	}
 	search := func(q string, ai bool) func(a *app, tt *ui.Tester) {
 		return func(a *app, tt *ui.Tester) {
 			if cachedRS != nil { // reuse: one paid search per screenshot pair
@@ -273,7 +313,7 @@ func TestScreenshots(t *testing.T) {
 					a.addTurn(tr)
 					a.msgs = append(dsapi.FirstMessages(q, tr.sources, "", time.Now()), dsapi.Message{Role: "assistant", Content: cachedAns})
 					a.focusChat = true
-					tt.SetSize(expandedWidth, panelHeight)
+					tt.SetSize(panelWidth, panelHeight)
 				} else {
 					a.cfg.AI = false
 					tt.SetSize(panelWidth, panelHeight)
@@ -284,8 +324,7 @@ func TestScreenshots(t *testing.T) {
 			tt.Type(q)
 			tt.Key(0, ui.KeyEnter)
 			if ai {
-				tt.Key(0, ui.KeyTab) // the keyboard to the follow-up box
-				tt.SetSize(expandedWidth, panelHeight)
+				tt.SetSize(panelWidth, panelHeight)
 			} else {
 				a.cfg.AI = false
 				tt.SetSize(panelWidth, panelHeight)
@@ -302,9 +341,13 @@ func TestScreenshots(t *testing.T) {
 	}
 	shots("1-home", func(a *app, tt *ui.Tester) {})
 	shots("2-expanded-ai", search("DeepSeek 搜索 API 怎么收费", true))
+	shots("2-sources", func(a *app, tt *ui.Tester) {
+		search("DeepSeek 搜索 API 怎么收费", true)(a, tt)
+		openDrawer(a, tt)
+	})
 	shots("3-collapsed", func(a *app, tt *ui.Tester) {
 		search("DeepSeek 搜索 API 怎么收费", true)(a, tt)
-		a.expand(false)
+		a.summarize(false)
 		tt.SetSize(panelWidth, panelHeight)
 		a.choose(2)
 		tt.Frame()
@@ -313,6 +356,7 @@ func TestScreenshots(t *testing.T) {
 	var followMsgs []dsapi.Message
 	shots("10-follow-up-search", func(a *app, tt *ui.Tester) {
 		search("DeepSeek 搜索 API 怎么收费", true)(a, tt)
+		openDrawer(a, tt)
 		if followTurn == nil {
 			// The real API: a follow-up far outside what a pricing search
 			// returned, so the model has to search again. Whether it does is
@@ -398,6 +442,7 @@ func TestScreenshots(t *testing.T) {
 	})
 	shots("12-split", func(a *app, tt *ui.Tester) {
 		search("DeepSeek 搜索 API 怎么收费", true)(a, tt)
+		openDrawer(a, tt)
 		tt.Frame()
 		r, _ := tt.Find("分隔条")
 		x, y := r.X+r.W/2, r.Y+r.H/2
@@ -492,6 +537,7 @@ func TestReader(t *testing.T) {
 	tt := ui.NewTester(a.view, panelWidth, panelHeight)
 	tt.Type("go")
 	tt.Key(0, ui.KeyEnter)
+	tt.Key(0, ui.KeyTab) // the sources, where space previews
 	tt.Key(0, ui.KeySpace)
 	if a.page != pageReader || !tt.HasText("在浏览器打开") {
 		t.Fatalf("page %v, texts %q", a.page, tt.Texts())
@@ -524,6 +570,7 @@ func TestInfiniteScroll(t *testing.T) {
 	if len(f.counts) != 1 || f.counts[0] != 10 || len(a.results) != 9 { // 10 asked, one duplicate among them
 		t.Fatalf("counts %v results %d", f.counts, len(a.results))
 	}
+	tt.Key(0, ui.KeyTab) // the sources, where the keyboard navigates
 	if !tt.Focused("搜索结果") {
 		t.Fatal("the results did not take the keyboard")
 	}
@@ -574,7 +621,7 @@ func TestInfiniteScroll(t *testing.T) {
 		t.Errorf("⌘↑: chosen %d", a.chosen)
 	}
 	// Expanded, the AI summary reads the first 10 only.
-	a.expand(true)
+	a.summarize(true)
 	if len(a.turns) != 1 || len(a.turns[0].sources) != 9 || len(f.chats) != 1 {
 		t.Errorf("summary read %d", len(a.turns[0].sources))
 	}
@@ -661,6 +708,7 @@ func TestKeyboardKeepsChosenVisible(t *testing.T) {
 	tt := ui.NewTester(a.view, panelWidth, panelHeight)
 	tt.Type("长")
 	tt.Key(0, ui.KeyEnter)
+	tt.Key(0, ui.KeyTab) // the sources, where ↑↓ scroll the list
 	for i := 0; i < 9; i++ {
 		tt.Key(0, ui.KeyDown)
 		tt.Advance(time.Second)
@@ -735,6 +783,7 @@ func TestQuit(t *testing.T) {
 func TestKeyRouting(t *testing.T) {
 	f := &fake{results: many(48), answer: []string{"总结"}}
 	a, opened := testApp(f)
+	a.cfg.AI = false // the results' own keys, with the answer off
 	var copied []string
 	a.copy = func(s string) { copied = append(copied, s) }
 	tt := ui.NewTester(a.view, panelWidth, panelHeight)
@@ -822,7 +871,7 @@ func TestKeyRouting(t *testing.T) {
 	if a.query != "新" {
 		t.Errorf("⌘L then typing: %q", a.query)
 	}
-	// Tab from the field opens the conversation; ⇧⇥ closes it, esc hides.
+	// Tab from the field opens the answer; ⇧⇥ closes it, esc hides.
 	tt.Key(0, ui.KeyTab)
 	if !a.cfg.AI || !tt.Focused("追问") {
 		t.Errorf("Tab: AI %v", a.cfg.AI)

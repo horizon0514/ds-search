@@ -36,7 +36,8 @@ func expanded(t *testing.T, f *fake) (*app, *ui.Tester, *[]string) {
 	tt := ui.NewTester(a.view, expandedWidth, panelHeight)
 	tt.Type("原始")
 	tt.Key(0, ui.KeyEnter)
-	tt.Key(0, ui.KeyTab)
+	tt.Key(0, ui.KeyTab) // ⇥: the sources in, keyboard on the list
+	tt.Key(0, ui.KeyTab) // ⇥ again: back to the answer
 	if len(a.turns) != 1 || a.turns[0].busy || !tt.Focused("追问") {
 		t.Fatalf("no summary: turns %d focused %v", len(a.turns), tt.Focused("追问"))
 	}
@@ -219,6 +220,12 @@ func TestPaneKeys(t *testing.T) {
 	if hidden != 1 || !a.cfg.AI {
 		t.Errorf("esc: AI %v hidden %d", a.cfg.AI, hidden)
 	}
+	// ⇧⇥ closes the drawer first; the answer stays, and takes the keyboard.
+	tt.Key(ui.Shift, ui.KeyTab)
+	if a.cfg.Sources || !a.cfg.AI || !tt.Focused("追问") {
+		t.Errorf("⇧⇥: drawer %v AI %v focused %v", a.cfg.Sources, a.cfg.AI, tt.Focused("追问"))
+	}
+	// Again: with the sources closed, it closes the answer.
 	tt.Key(ui.Shift, ui.KeyTab)
 	if a.cfg.AI || !tt.Focused("搜索结果") {
 		t.Errorf("⇧⇥: AI %v focused %v", a.cfg.AI, tt.Focused("搜索结果"))

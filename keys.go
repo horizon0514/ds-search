@@ -27,16 +27,15 @@ func keys(shortcut string) string {
 }
 
 // keysSearch: the keyboard on the search page. After a search it is on the
-// results (a.list), as in Spotlight: ↑↓ choose, ↵ opens, space previews,
-// ⇥ the AI summary; typing goes back to the query (listInput). On the
-// query, ↵ searches and ↓ goes down to the results.
+// answer, as in Spotlight: ⇥ brings in the sources, ↑↓ choose one, ↵ opens
+// it, space previews it; typing goes back to the query (listInput). On the
+// query, ↵ searches and ↓ goes down to the sources.
 func (a *app) keysSearch(c *ui.Context) {
 	onChat := a.cfg.AI && a.chatInput.Focused(c)
 	onList := a.listFocus.Focused(c) && len(a.results) > 0 && !a.showingHistory()
 	if c.Shortcut(0, ui.KeyEscape) {
 		// esc always hides the panel: it is called with ⌥Space to be
-		// dismissed, and now the conversation is open by default. ⇧⇥ is
-		// what closes the conversation.
+		// dismissed. ⇧⇥ is what closes the sources, then the answer.
 		a.hide()
 	}
 	if c.Shortcut(ui.Cmd, ui.KeyL) {
@@ -44,9 +43,13 @@ func (a *app) keysSearch(c *ui.Context) {
 		a.input.Focus()
 	}
 	if c.Shortcut(ui.Shift, ui.KeyTab) {
-		// esc hides the panel, so ⇧⇥ is the keyboard's way back to the
-		// results alone: it closes the conversation (as the ✨ chip does).
-		a.toggleAI()
+		// esc hides the panel, so ⇧⇥ is the keyboard's way back: it
+		// closes the sources, and with them already closed, the answer.
+		if a.cfg.Sources {
+			a.hideSources()
+		} else {
+			a.toggleSummary()
+		}
 		return
 	}
 	if a.cfg.AI && c.Shortcut(ui.Cmd, ui.KeyN) {
@@ -56,10 +59,14 @@ func (a *app) keysSearch(c *ui.Context) {
 		switch {
 		case c.Shortcut(0, ui.KeyTab):
 			if len(a.results) > 0 && !a.showingHistory() {
-				a.listFocus.Focus()
+				a.showSources()
 			} else {
 				a.input.Focus()
 			}
+		case c.Shortcut(0, ui.KeyDown) && strings.TrimSpace(a.draft) == "":
+			// ↓ opens the sources, as it does on the query.
+			a.showSources()
+			a.choose(max(a.chosen, 0))
 		case c.Shortcut(ui.Cmd, ui.KeyEnter):
 			if a.chosen >= 0 && a.chosen < len(a.results) {
 				a.openURL(a.results[a.chosen].URL)
@@ -73,7 +80,14 @@ func (a *app) keysSearch(c *ui.Context) {
 		return
 	}
 	if c.Shortcut(0, ui.KeyTab) || c.Shortcut(ui.Cmd, ui.KeyEnter) {
-		a.expand(true) // and the keyboard to the conversation
+		switch {
+		case !a.cfg.AI: // the answer, and the keyboard to it
+			a.summarize(true)
+		case onList: // back to the answer
+			a.focusChat = true
+		default: // the sources, opened for the reading
+			a.showSources()
+		}
 	}
 	if !onList {
 		switch {
@@ -82,7 +96,11 @@ func (a *app) keysSearch(c *ui.Context) {
 		case a.showingHistory() && c.Shortcut(0, ui.KeyUp):
 			a.choose(a.chosen - 1)
 		case len(a.results) > 0 && !a.showingHistory() && c.Shortcut(0, ui.KeyDown):
-			a.listFocus.Focus()
+			if a.cfg.AI {
+				a.showSources()
+			} else {
+				a.listFocus.Focus()
+			}
 			a.choose(max(a.chosen, 0))
 		}
 		return
@@ -213,24 +231,24 @@ func shortcutGroups() [][3]string {
 	m := cmdKey()
 	return [][3]string{
 		{"输入框", "↵", "搜索，并让 AI 总结（默认自动）"},
-		{"", "↓", "进入来源列表"},
-		{"来源（左侧）", "↑ ↓", "选择（滚到底自动加载更多）"},
+		{"", "↓", "展开来源（右侧抽屉）并进入列表"},
+		{"来源（右侧）", "↑ ↓", "选择（滚到底自动加载更多）"},
 		{"", "↵", "在浏览器打开"},
 		{"", "空格", "预览（阅读模式）"},
-		{"", "⇥", "在来源与对话之间切换（AI 栏关闭时先展开）"},
-		{"", "⇧⇥", "收起 / 展开 ✨ AI 栏"},
+		{"", "⇥", "回到 AI 总结"},
+		{"", "⇧⇥", "收起来源（再按一次只看搜索结果）"},
 		{"", m + "C", "复制链接"},
 		{"", "直接打字  /  ⌫", "回到输入框改搜索词"},
 		{"", m + "↑  " + m + "↓", "到第一条 / 最后一条"},
 		{"", "⌥←  ⌥→", "切换来源：原始搜索 / 各轮追问搜到的"},
 		{"", m + "1 … " + m + "9", "打开第 N 条"},
-		{"AI 对话（右侧）", "↵  /  ⇧↵", "发送追问 / 换行"},
-		{"", "⇥", "回到来源列表"},
+		{"AI 总结（中间）", "↵  /  ⇧↵", "发送追问 / 换行"},
+		{"", "⇥", "展开来源，键盘到列表"},
 		{"", "↑（输入框为空时）", "取回上一个问题"},
-		{"", m + "1 … " + m + "9", "在左侧选中来源 [N]，再按一次打开"},
-		{"", m + "↵", "打开左侧选中的来源"},
+		{"", m + "1 … " + m + "9", "在来源里选中 [N]，再按一次打开"},
+		{"", m + "↵", "打开选中的来源"},
 		{"", m + "N", "新对话（保留搜索结果）"},
-		{"", "esc", "隐藏面板（收起 AI 栏用 ⇧⇥）"},
+		{"", "esc", "隐藏面板（⇧⇥ 收起来源，再按只看结果）"},
 		{"预览", "↑ ↓  /  空格", "滚动"},
 		{"", "↵", "在浏览器打开原文"},
 		{"", "esc  /  ←", "返回结果"},

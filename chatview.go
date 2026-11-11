@@ -18,7 +18,10 @@ func (a *app) chatPane(c *ui.Context, k ink) {
 				ui.Spinner(c).Size(11, 11)
 			}
 			ui.Spacer(c)
-			ui.Text(c, a.modelName()+" · 可联网追问").FontSize(11).TextColor(k.faint)
+			if len(a.results) > 0 && !a.cfg.Sources {
+				a.sourcesChip(c, k)
+			}
+			ui.Text(c, a.modelName()).FontSize(11).TextColor(k.faint)
 			ui.Row(c.Key("new")).Padding(3, 8).Radius(6).Cursor(ui.CursorPointer).Label("新对话").
 				Tooltip("清空对话，保留搜索结果  " + cmdKey() + "N").OnClick(a.newChat).Children(func() {
 				ui.Text(c, "新对话 "+cmdKey()+"N").FontSize(11).TextColor(k.muted)
@@ -40,10 +43,14 @@ func (a *app) chatPane(c *ui.Context, k ink) {
 		}
 		ui.Divider(c)
 		ui.Row(c.Key("composer")).Padding(10, 14, 10, 16).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.TextAreaBase(c.Key("draft"), &a.draft).Bind(&a.chatInput).Grow(1).FontSize(14).MaxHeight(96).
+			draft := ui.TextAreaBase(c.Key("draft"), &a.draft).Bind(&a.chatInput).Grow(1).FontSize(14).MaxHeight(96).
 				Placeholder("追问…（↵ 发送，⇧↵ 换行）").Label("追问").OnTextKey(a.draftKey)
 			if a.focusChat {
+				// The first search shows this pane for the first time,
+				// and a handle's focus lands a frame late: AutoFocus
+				// takes the frame the box appears in.
 				a.focusChat = false
+				draft.AutoFocus()
 				a.chatInput.Focus()
 			}
 		})
@@ -59,6 +66,11 @@ func (a *app) draftKey(k ui.TextKey) bool {
 		if a.ask(k.Text()) {
 			k.SetText("")
 		}
+		return true
+	case k.Key == ui.KeyDown && k.Mods == 0 && k.Text() == "" && len(a.results) > 0 && !a.showingHistory():
+		// ↓ slides the sources in, as it does on the query.
+		a.showSources()
+		a.choose(max(a.chosen, 0))
 		return true
 	case k.Key == ui.KeyUp && k.Mods == 0 && k.Text() == "" && a.lastQuestion != "":
 		k.SetText(a.lastQuestion)
@@ -104,7 +116,7 @@ func (a *app) turnView(c *ui.Context, k ink, i int) {
 				text += fmt.Sprintf(" · %d 条", s.n)
 			}
 			ui.Row(c.Key(fmt.Sprint("s", j))).Gap(6).AlignItems(ui.Center).Cursor(ui.CursorPointer).
-				Tooltip("在左侧查看这一轮的来源").OnClick(func() { a.showSet(t.set) }).Children(func() {
+				Tooltip("在来源抽屉里看这一轮的来源").OnClick(func() { a.showSet(t.set) }).Children(func() {
 				if s.busy {
 					ui.Spinner(c).Size(11, 11)
 				} else {
@@ -147,9 +159,31 @@ func searching(t *turn) bool {
 	return false
 }
 
-// sourcesHead names the left pane what it is beside the summary: the
-// sources. Once a turn has searched, its chips switch the list between
-// the search's sources and each turn's (⌥← ⌥→).
+// sourcesChip opens the sources drawer: the answer is the panel, and the
+// list it read comes in from the right.
+func (a *app) sourcesChip(c *ui.Context, k ink) {
+	label := fmt.Sprintf("来源 · %d 条", len(a.results))
+	if a.searching && len(a.all) == 0 {
+		label = "正在搜索…"
+	}
+	ui.Row(c.Key("srcs")).Gap(4).Padding(3, 8).Radius(6).Background(k.chosen).AlignItems(ui.Center).
+		Cursor(ui.CursorPointer).Tooltip("来源  ⇥ 展开 / ⇧⇥ 收起").Label("来源").OnClick(a.showSources).Children(func() {
+		ui.Icon(c, iconBook).FontSize(11).TextColor(k.link)
+		ui.Text(c, label).FontSize(11).TextColor(k.link)
+	})
+}
+
+// collapseChip closes the drawer (⇧⇥).
+func (a *app) collapseChip(c *ui.Context, k ink) {
+	ui.Row(c.Key("hide")).Padding(2, 6).Radius(6).AlignItems(ui.Center).Cursor(ui.CursorPointer).
+		Label("收起来源").Tooltip("收起来源  ⇧⇥").OnClick(a.hideSources).Children(func() {
+		ui.Text(c, "收起 ⇧⇥").FontSize(11).TextColor(k.faint)
+	})
+}
+
+// setChips heads the drawer: the sources, and once a turn has searched,
+// chips that switch the list between the search's sources and each turn's
+// (⌥← ⌥→).
 func (a *app) setChips(c *ui.Context, k ink) {
 	if a.showingHistory() || a.searchErr != "" {
 		return
@@ -163,24 +197,28 @@ func (a *app) setChips(c *ui.Context, k ink) {
 		if a.searching && len(a.all) == 0 {
 			head = "正在搜索…"
 		}
-		ui.Row(c.Key("srcs")).Padding(9, 12, 3, 14).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Row(c.Key("srcs")).Padding(8, 12, 2, 10).Gap(6).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, head).FontSize(11).FontWeight(600).TextColor(k.faint).Grow(1).SingleLine()
 			if a.searching || a.expanding {
 				ui.Spinner(c).Size(10, 10)
 			}
+			a.collapseChip(c, k)
 		})
 		return
 	}
-	ui.Row(c).Padding(8, 12, 2, 14).Gap(6).Wrap().Children(func() {
-		for _, s := range ss {
-			bg, fg := ui.Transparent, k.muted
-			if s == a.srcSet {
-				bg, fg = k.chosen, k.link
+	ui.Row(c).Padding(8, 12, 2, 10).Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Gap(6).Wrap().Grow(1).Children(func() {
+			for _, s := range ss {
+				bg, fg := ui.Transparent, k.muted
+				if s == a.srcSet {
+					bg, fg = k.chosen, k.link
+				}
+				ui.Row(c.Key(s)).Padding(3, 10).Radius(20).Background(bg).Border(1, k.line).Cursor(ui.CursorPointer).
+					Label(a.setLabel(s)).Tooltip("⌥← ⌥→ 切换").OnClick(func() { a.showSet(s) }).Children(func() {
+					ui.Text(c, a.setLabel(s)).FontSize(11).FontWeight(550).TextColor(fg).SingleLine()
+				})
 			}
-			ui.Row(c.Key(s)).Padding(3, 10).Radius(20).Background(bg).Border(1, k.line).Cursor(ui.CursorPointer).
-				Label(a.setLabel(s)).Tooltip("⌥← ⌥→ 切换").OnClick(func() { a.showSet(s) }).Children(func() {
-				ui.Text(c, a.setLabel(s)).FontSize(11).FontWeight(550).TextColor(fg).SingleLine()
-			})
-		}
+		})
+		a.collapseChip(c, k)
 	})
 }

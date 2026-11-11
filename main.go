@@ -99,7 +99,7 @@ func (s *shell) ready() {
 		Frameless:   true,
 		Transparent: true,
 		Vibrancy:    vibrancy(cfg.Translucent),
-		Width:       widthFor(cfg, cfg.AI, expandedWidth+48),
+		Width:       widthFor(cfg, a.wide(), expandedWidth+48),
 		Height:      heightFor(cfg),
 		MinWidth:    minWidth,
 		MinHeight:   minHeight,
@@ -177,7 +177,7 @@ func (s *shell) save(cfg config) {
 // way down, with the query selected.
 func (s *shell) show() {
 	d := mygo.Screen.DisplayNearestPoint(mygo.Screen.CursorScreenPoint())
-	w, h := widthFor(s.a.cfg, s.a.cfg.AI, d.WorkArea.Width), min(heightFor(s.a.cfg), d.WorkArea.Height-40)
+	w, h := widthFor(s.a.cfg, s.a.wide(), d.WorkArea.Width), min(heightFor(s.a.cfg), d.WorkArea.Height-40)
 	s.animating = true
 	defer func() { s.animating = false }()
 	s.panel.SetBounds(mygo.Rectangle{X: d.WorkArea.X + (d.WorkArea.Width-w)/2, Y: d.WorkArea.Y + (d.WorkArea.Height-h)/5, Width: w, Height: h})
@@ -336,7 +336,7 @@ func (s *shell) resized() {
 	}
 	w, h := s.panel.Size()
 	cfg := &s.a.cfg
-	if cfg.AI {
+	if s.a.wide() {
 		cfg.WideWidth = w
 	} else {
 		cfg.Width = w
