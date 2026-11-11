@@ -295,9 +295,12 @@ func (a *app) aiChip(c *ui.Context, k ink) {
 
 // row is a result: the site and its date, the title, the snippet.
 //
-// Beside the summary (dense) a result is a source: numbered like the [n]
-// the answer cites, one line of title, one of site, no snippet. With the
-// conversation closed the list is all there is, and the rows breathe.
+// Beside the summary (dense) a result is a source, and a source is
+// evidence: its number matches the [n] the answer cites, and it is one
+// quiet line of text. The site, its date and the quality badges come up
+// only for the row being read, so ten sources stay lighter than the
+// answer above them. With the conversation closed the list is all there
+// is, and the rows breathe again.
 func (a *app) row(c *ui.Context, k ink, i int) {
 	r := a.results[i]
 	dense := a.cfg.AI
@@ -317,6 +320,8 @@ func (a *app) row(c *ui.Context, k ink, i int) {
 	if hover && i != a.chosen {
 		row.Background(k.hover)
 	}
+	// The row being read is the one that shows where it came from.
+	lead := !dense || i == a.chosen || hover
 	row.OnClick(func() {
 		if a.chosen == i {
 			a.openURL(r.URL)
@@ -325,62 +330,74 @@ func (a *app) row(c *ui.Context, k ink, i int) {
 		}
 	})
 	row.Children(func() {
+		if dense {
+			a.sourceRow(c, k, r, i, lead)
+			return
+		}
 		ui.Row(c).Gap(7).AlignItems(ui.Center).Children(func() {
-			if dense {
-				// Its number, so the row and the answer's [n] are one thing.
-				ui.Text(c, fmt.Sprintf("%d.", i+1)).FontSize(11).FontWeight(600).TextColor(k.faint)
-			}
 			site := siteName(r)
 			if b := a.icon(r.SiteIcon); b != nil {
-				size := float32(16)
-				if dense {
-					size = 13 // a source line: the icon supports it, it does not lead it
-				}
-				ui.Image(c, b).Size(size, size).Radius(4)
+				ui.Image(c, b).Size(16, 16).Radius(4)
 			} else {
-				size := float32(16)
-				if dense {
-					size = 13
-				}
-				ui.Avatar(c, site, nil).Size(size, size).FontSize(9)
+				ui.Avatar(c, site, nil).Size(16, 16).FontSize(9)
 			}
 			ui.Text(c, site).FontSize(12).TextColor(k.muted).SingleLine().Shrink(1)
-			if !dense {
-				ui.Text(c, host(r.URL)).FontSize(11).TextColor(k.faint).SingleLine().Shrink(2)
-			}
+			ui.Text(c, host(r.URL)).FontSize(11).TextColor(k.faint).SingleLine().Shrink(2)
 			if d := when(r, time.Now()); d != "" {
 				ui.Text(c, "· "+d).FontSize(11).TextColor(k.faint).SingleLine()
 			}
 			ui.Spacer(c)
-			// Beside the summary only the row being read says what it is
-			// worth: ten colored badges would outshout the answer.
-			if !dense || i == a.chosen || hover {
-				if r.Authoritative() {
-					badge(c, "权威", k.green)
-				}
-				if r.Good() {
-					badge(c, "优质", k.gold)
-				}
-			}
-			if i == a.chosen {
-				ui.Row(c.Key("read")).Gap(4).Padding(2, 7).Radius(6).AlignItems(ui.Center).Cursor(ui.CursorPointer).
-					Tooltip("预览  空格").Label("预览").OnClick(a.read).Children(func() {
-					ui.Icon(c, iconBook).FontSize(12).TextColor(k.link)
-					ui.Text(c, "预览").FontSize(11).TextColor(k.link)
-				})
-			}
+			a.rowMarks(c, k, r, i)
 		})
-		// A result is a link, so its title is blue. A source is evidence
-		// for the answer above it, so its title is plain ink, smaller.
-		size, col, weight := float32(16), k.link, 500
-		if dense {
-			size, col, weight = 13, k.text, 450
-		}
-		ui.Text(c, oneLine(r.Title)).FontSize(size).FontWeight(weight).TextColor(col).MaxLines(1)
-		if r.Snippet != "" && !dense {
+		ui.Text(c, oneLine(r.Title)).FontSize(16).FontWeight(500).TextColor(k.link).MaxLines(1)
+		if r.Snippet != "" {
 			ui.Text(c, oneLine(r.Snippet)).FontSize(13).LineHeight(1.45).TextColor(k.muted).MaxLines(2)
 		}
 	})
+}
+
+// sourceRow is a source in the sidebar: its number, one line of title, and
+// for the row being read where it came from. Grey and small on purpose: the
+// answer is what the panel is for.
+func (a *app) sourceRow(c *ui.Context, k ink, r dsapi.Result, i int, lead bool) {
+	line := ui.Row(c).Gap(6).AlignItems(ui.Center)
+	line.Children(func() {
+		// Its number, so the row and the answer's [n] are one thing.
+		ui.Text(c, fmt.Sprintf("%d.", i+1)).FontSize(10.5).FontWeight(600).TextColor(k.faint)
+		col, weight := k.muted, 400
+		if i == a.chosen {
+			col, weight = k.text, 500
+		}
+		ui.Text(c, oneLine(r.Title)).FontSize(12.5).FontWeight(weight).TextColor(col).SingleLine().Grow(1).Shrink(1)
+		if lead {
+			site := siteName(r)
+			if b := a.icon(r.SiteIcon); b != nil {
+				ui.Image(c, b).Size(12, 12).Radius(3)
+			} else {
+				ui.Avatar(c, site, nil).Size(12, 12).FontSize(8)
+			}
+			ui.Text(c, site).FontSize(10.5).TextColor(k.faint).SingleLine().Shrink(1)
+			a.rowMarks(c, k, r, i)
+		}
+	})
+}
+
+// rowMarks is what a row can say about itself once it is being read: how
+// good the search thinks it is, and how to read all of it.
+func (a *app) rowMarks(c *ui.Context, k ink, r dsapi.Result, i int) {
+	if r.Authoritative() {
+		badge(c, "权威", k.green)
+	}
+	if r.Good() {
+		badge(c, "优质", k.gold)
+	}
+	if i == a.chosen {
+		ui.Row(c.Key("read")).Gap(4).Padding(2, 7).Radius(6).AlignItems(ui.Center).Cursor(ui.CursorPointer).
+			Tooltip("预览  空格").Label("预览").OnClick(a.read).Children(func() {
+			ui.Icon(c, iconBook).FontSize(12).TextColor(k.link)
+			ui.Text(c, "预览").FontSize(11).TextColor(k.link)
+		})
+	}
 }
 
 func badge(c *ui.Context, text string, col ui.Color) {
