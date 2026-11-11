@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"image"
 	"image/color"
@@ -18,6 +19,7 @@ import (
 
 	"ds-search/billing"
 	"ds-search/dsapi"
+	"ds-search/websearch"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/transfer"
@@ -68,14 +70,29 @@ func (s *shell) quit() {
 	mygo.App.Quit()
 }
 
-func newSource(cfg config) func(string) source {
-	return func(key string) source {
-		c := dsapi.New(key)
-		if cfg.Model != "" {
-			c.Model = cfg.Model
-		}
-		return c
+// combinedSource keeps DeepSeek for reading and the model, while the
+// search comes from whichever provider the user chose.
+type combinedSource struct {
+	*dsapi.Client
+	search searcher
+}
+
+func (c *combinedSource) Name() string { return c.search.Name() }
+
+func (c *combinedSource) Search(ctx context.Context, q string, n int) ([]dsapi.Result, error) {
+	return c.search.Search(ctx, q, n)
+}
+
+func newSource(cfg config, key, tavilyKey string) source {
+	c := dsapi.New(key)
+	if cfg.Model != "" {
+		c.Model = cfg.Model
 	}
+	var search searcher = c
+	if cfg.Source == "tavily" {
+		search = websearch.NewTavily(tavilyKey)
+	}
+	return &combinedSource{Client: c, search: search}
 }
 
 func (s *shell) ready() {
@@ -84,8 +101,11 @@ func (s *shell) ready() {
 	cfg := loadConfig(dir)
 	ks := keyStore{secrets: mygoSecrets{}, dir: dir, env: os.Getenv}
 	st := ks.load(cfg.KeyStore)
-	a := newApp(cfg, st.key, st.from, newSource(cfg))
+	tv := ks.loadTavily(cfg.KeyStore)
+	a := newApp(cfg, st.key, st.from, tv.key, newSource)
 	a.keys, a.keyErr, a.dataDir = ks, st.err, dir
+	a.tvErr = tv.err
+	a.tvFrom = tv.from
 	if st.key == "" && st.err != "" {
 		a.settingsMsg, a.settingsErr = "", true
 	}

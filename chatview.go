@@ -21,7 +21,7 @@ func (a *app) chatPane(c *ui.Context, k ink) {
 			if len(a.results) > 0 && !a.cfg.Sources {
 				a.sourcesChip(c, k)
 			}
-			ui.Text(c, a.modelName()).FontSize(11).TextColor(k.faint)
+			ui.Text(c, a.modelLabel()).FontSize(11).TextColor(k.faint)
 			ui.Row(c.Key("new")).Padding(3, 8).Radius(6).Cursor(ui.CursorPointer).Label("新对话").
 				Tooltip("清空对话，保留搜索结果  " + cmdKey() + "N").OnClick(a.newChat).Children(func() {
 				ui.Text(c, "新对话 "+cmdKey()+"N").FontSize(11).TextColor(k.muted)
@@ -80,10 +80,18 @@ func (a *app) draftKey(k ui.TextKey) bool {
 }
 
 func (a *app) modelName() string {
-	if a.src == nil {
+	if a.brain == nil {
 		return "deepseek"
 	}
-	return a.src.ModelName()
+	return a.brain.ModelName()
+}
+
+// modelLabel names the model, and the search provider when it isn't DeepSeek.
+func (a *app) modelLabel() string {
+	if a.seek != nil && a.seek.Name() == "tavily" {
+		return a.modelName() + " · Tavily 搜索"
+	}
+	return a.modelName()
 }
 
 // turnView is a turn: the question, the searches it made, the answer.

@@ -178,6 +178,30 @@ func (a *app) shortcutField(c *ui.Context, k ink) {
 }
 
 func (a *app) tabKey(c *ui.Context, k ink) {
+	section(c, k, "网页搜索源", "DeepSeek 仍是总结与阅读所用的模型；这里只决定网页搜索由谁来做。", func() {
+		sel := 0
+		if a.cfg.Source == "tavily" {
+			sel = 1
+		}
+		if ui.Segmented(c.Key("source"), &sel, "DeepSeek（默认）", "Tavily").Label("搜索源").Changed() {
+			source := ""
+			if sel == 1 {
+				source = "tavily"
+			}
+			a.setSource(source)
+		}
+		desc := "搜索走 DeepSeek Search API，和总结共用这一个 Key，约 ¥5 / 1000 次。"
+		if a.cfg.Source == "tavily" {
+			desc = "搜索走 Tavily，单独计费（约 $8 / 1000 次，按 7.1 汇率约 ¥0.057 / 次）；总结与阅读仍走 DeepSeek。"
+			if a.tvKey == "" {
+				desc += " 还没有 Tavily Key，搜索会提示先填写。"
+			}
+		}
+		ui.Text(c, desc).FontSize(11).TextColor(k.muted).LineHeight(1.45)
+		if a.cfg.Source == "tavily" {
+			a.tavilyKeyBlock(c, k)
+		}
+	})
 	section(c, k, "DeepSeek API Key", "到 platform.deepseek.com 的「API keys」创建，粘贴到这里。保存前会用一次极短的对话验证。", func() {
 		if a.keyErr != "" && a.keyFrom != "keychain" {
 			ui.Column(c.Key("kcerr")).Gap(8).Padding(10, 12).Radius(10).Background(k.danger.Alpha(0.08)).Children(func() {
@@ -215,7 +239,6 @@ func (a *app) tabKey(c *ui.Context, k ink) {
 				}
 			})
 		}
-		a.message(c, k)
 	})
 	section(c, k, "保存位置", "", func() {
 		sel := 0
@@ -229,11 +252,53 @@ func (a *app) tabKey(c *ui.Context, k ink) {
 			}
 			a.setKeyStore(mode)
 		}
-		desc := "钥匙串由系统加密保存。本 App 未经 Apple 签名，更新后 macOS 可能要求重新授权（选「始终允许」）。"
+		desc := "钥匙串由系统加密保存，两个 Key 用同一种方式。本 App 未经 Apple 签名，更新后 macOS 可能要求重新授权（选「始终允许」）。"
 		if a.cfg.KeyStore == "file" {
-			desc = "备用方式：保存在 " + a.keys.path() + "（权限 0600，只有你的账户能读）。不经钥匙串，App 更新后也无需授权，但没有系统加密。"
+			desc = "备用方式：两个 Key 分别保存在 " + a.keys.pathOf(keyFile) + " 与 " + a.keys.pathOf(tavilyKeyFile) + "（权限 0600，只有你的账户能读）。不经钥匙串，App 更新后也无需授权，但没有系统加密。"
 		}
 		ui.Text(c, desc).FontSize(11).TextColor(k.muted).LineHeight(1.45)
+	})
+	a.message(c, k)
+}
+
+// tavilyKeyBlock is the Tavily key's saved state, or its input.
+func (a *app) tavilyKeyBlock(c *ui.Context, k ink) {
+	ui.Column(c.Key("tavily")).Gap(8).Padding(10, 12).Radius(10).BorderWidth(1).BorderColor(k.line).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "Tavily API Key").FontSize(12).FontWeight(600).Grow(1)
+			ui.Link(c.Key("tvlink"), "创建 Key ›", "https://app.tavily.com/home").FontSize(11)
+		})
+		if a.tvErr != "" && a.tvFrom != "keychain" {
+			ui.Text(c, a.tvErr+"。可点「重试读取」，或在弹窗中选「始终允许」。").FontSize(11).TextColor(k.danger).LineHeight(1.4)
+			ui.Row(c).Gap(8).Children(func() {
+				ui.Button(c.Key("tvretry"), "重试读取").OnClick(a.reloadTavilyKey)
+				if a.cfg.KeyStore != "file" {
+					ui.Button(c.Key("tvfile"), "改用本地文件").OnClick(func() { a.setKeyStore("file") })
+				}
+			})
+		}
+		if a.tvKey != "" && !a.tvChanging {
+			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+				ui.Column(c).Grow(1).Gap(2).Children(func() {
+					ui.Text(c, "已保存  "+maskKey(a.tvKey)).FontSize(13).FontWeight(550)
+					ui.Text(c, "存于："+storeNameFor(a.tvFrom, "TAVILY_API_KEY")).FontSize(11).TextColor(k.muted)
+				})
+				ui.Button(c.Key("tvchange"), "更换").OnClick(func() { a.tvChanging, a.tvEdit = true, "" })
+				if a.tvFrom != "env" {
+					ui.Button(c.Key("tvdelete"), "删除").OnClick(a.deleteTavilyKey)
+				}
+			})
+		} else {
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.TextInput(c.Key("tvkey"), &a.tvEdit).Label("Tavily API Key").Placeholder("tvly-…").Password().Grow(1).
+					Disabled(a.checking).OnSubmit(a.saveTavilyKey)
+				ui.PrimaryButton(c.Key("tvsave"), "验证并保存").Disabled(a.checking || strings.TrimSpace(a.tvEdit) == "").OnClick(a.saveTavilyKey)
+				if a.tvChanging {
+					ui.Button(c.Key("tvcancel"), "取消").OnClick(func() { a.tvChanging, a.tvEdit = false, "" })
+				}
+			})
+			ui.Text(c, "验证会发起 1 次最小搜索，计 1 次 Tavily 费用。").FontSize(10).TextColor(k.faint)
+		}
 	})
 }
 
@@ -278,7 +343,7 @@ func (a *app) tabUsage(c *ui.Context, k ink) {
 			ui.Text(c, a.usageMsg).FontSize(11).TextColor(k.muted)
 		}
 	})
-	ui.Text(c, "本机按官方价格估算：搜索、阅读每次成功请求 ¥0.005（含 AI 追问时模型发起的搜索）；AI 对话的每次调用（含工具调用轮次）按 deepseek-flash 实际返回的 token 数计价，区分缓存命中/未命中与北京时间高峰/空闲时段。以 platform.deepseek.com 的账单为准。").
+	ui.Text(c, "本机按官方价格估算：DeepSeek 搜索、阅读每次成功请求 ¥0.005（含 AI 追问时模型发起的搜索）；Tavily 搜索按 $8 / 1000 次、约 7.1 汇率折算。AI 对话的每次调用（含工具调用轮次）按 deepseek-flash 实际返回的 token 数计价，区分缓存命中/未命中与北京时间高峰/空闲时段。以 DeepSeek 与 Tavily 的官方账单为准。").
 		FontSize(11).TextColor(k.muted).LineHeight(1.5)
 }
 
@@ -311,7 +376,8 @@ func (a *app) tabAbout(c *ui.Context, k ink) {
 		rows := [][2]string{
 			{"设置与搜索历史", a.dataDir + "/config.json"},
 			{"用量账本", a.dataDir + "/usage.json"},
-			{"API Key", storeName(a.keyFrom)},
+			{"DeepSeek API Key", storeName(a.keyFrom)},
+			{"Tavily API Key", storeNameFor(a.tvFrom, "TAVILY_API_KEY")},
 		}
 		for _, r := range rows {
 			ui.Row(c.Key(r[0])).Gap(12).Children(func() {

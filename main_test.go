@@ -15,6 +15,7 @@ import (
 
 	"ds-search/billing"
 	"ds-search/dsapi"
+	"ds-search/websearch"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -33,6 +34,7 @@ type fake struct {
 	counts  []int
 	fail50  error
 	balance string
+	name    string
 }
 
 func (f *fake) Search(_ context.Context, q string, n int) ([]dsapi.Result, error) {
@@ -82,7 +84,13 @@ func (f *fake) Chat(ctx context.Context, msgs []dsapi.Message, tools []dsapi.Too
 	return dsapi.Reply{Content: b.String(), Usage: u}, nil
 }
 func (f *fake) Check(context.Context) error { return nil }
-func (f *fake) ModelName() string           { return "deepseek-flash" }
+func (f *fake) Name() string {
+	if f.name != "" {
+		return f.name
+	}
+	return "deepseek"
+}
+func (f *fake) ModelName() string { return "deepseek-flash" }
 func (f *fake) GetBalance(context.Context) (dsapi.AccountBalance, error) {
 	b := f.balance
 	if b == "" {
@@ -94,7 +102,7 @@ func (f *fake) GetBalance(context.Context) (dsapi.AccountBalance, error) {
 func str(s string) *string { return &s }
 
 func testApp(src source) (*app, *[]string) {
-	a := newApp(defaultConfig(), "k", "keychain", func(string) source { return src })
+	a := newApp(defaultConfig(), "k", "keychain", "", func(config, string, string) source { return src })
 	a.keys = keyStore{secrets: &memSecrets{}, dir: os.TempDir() + "/ds-search-test", env: func(string) string { return "" }}
 	a.spawn = func(fn func()) { fn() }
 	a.icons = map[string]*ui.Bitmap{}
@@ -102,6 +110,53 @@ func testApp(src source) (*app, *[]string) {
 	opened := &[]string{}
 	a.open = func(u string) { *opened = append(*opened, u) }
 	return a, opened
+}
+
+// The composite source keeps DeepSeek for the model and reading, and
+// sends only the search to the chosen provider.
+func TestSearchSourceRouting(t *testing.T) {
+	d := newSource(defaultConfig(), "sk-test", "")
+	if d.Name() != "deepseek" || d.ModelName() != dsapi.DefaultModel {
+		t.Errorf("default: %q %q", d.Name(), d.ModelName())
+	}
+	tv := newSource(config{Source: "tavily"}, "sk-test", "")
+	if tv.Name() != "tavily" {
+		t.Errorf("tavily: %q", tv.Name())
+	}
+	if _, err := tv.Search(context.Background(), "go", 1); err != websearch.ErrNoKey {
+		t.Errorf("no Tavily key: %v", err)
+	}
+	if tv.ModelName() != dsapi.DefaultModel {
+		t.Errorf("model moved with search: %q", tv.ModelName())
+	}
+}
+
+// splitSource is a searcher, reader and model that can be different fakes.
+type splitSource struct {
+	searcher
+	reader
+	llm
+}
+
+// A Tavily search still reaches the DeepSeek model for the summary, and
+// is billed on Tavily's own line.
+func TestSearchProviderSplit(t *testing.T) {
+	seek := &fake{name: "tavily", results: []dsapi.Result{{Title: "T", URL: "https://t.example", Snippet: "s"}}}
+	brain := &fake{answer: []string{"总结 [1]"}}
+	a, _ := testApp(&splitSource{searcher: seek, reader: brain, llm: brain})
+	a.query = "go"
+	a.search()
+	tt := ui.NewTester(a.view, panelWidth, panelHeight)
+	if len(seek.queries) != 1 || a.seek.Name() != "tavily" {
+		t.Fatalf("search: %v %q", seek.queries, a.seek.Name())
+	}
+	if len(a.turns) != 1 || a.turns[0].answer != "总结 [1]" || !tt.HasText("总结") {
+		t.Errorf("summary: %+v, %q", a.turns, tt.Texts())
+	}
+	r := a.ledger.Report()
+	if r.Today.Tavily != 1 || r.Today.Search != 0 {
+		t.Errorf("billing: %+v", r.Today)
+	}
 }
 
 var canned = []dsapi.Result{
@@ -268,12 +323,12 @@ func TestScreenshots(t *testing.T) {
 	if key == "" || testing.Short() {
 		t.Skip("DEEPSEEK_API_KEY not set")
 	}
-	src := dsapi.New(key)
+	src := newSource(defaultConfig(), key, "")
 	macHints = true // the Mac's ⌘ in the hints
 	defer func() { macHints = runtime.GOOS == "darwin" }()
 	shots := func(name string, setup func(a *app, tt *ui.Tester)) {
 		for _, dark := range []bool{false, true} {
-			a := newApp(defaultConfig(), key, "keychain", func(string) source { return src })
+			a := newApp(defaultConfig(), key, "keychain", "", func(config, string, string) source { return src })
 			a.spawn = func(fn func()) { fn() }
 			a.balBusy = true // no real balance in screenshots
 			a.cfg.History = []string{"DeepSeek V4 site:deepseek.com", "Go 1.27 release notes", "杭州 天气 after:2026-10-01", "mygo egoist"}

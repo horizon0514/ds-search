@@ -276,6 +276,9 @@ func (c *Client) ModelName() string {
 	return c.Model
 }
 
+// Name is the search provider's name.
+func (c *Client) Name() string { return "deepseek" }
+
 // Answer streams a concise Chinese answer to query from results' summaries,
 // calling onDelta with each piece of text as it comes. It returns the
 // tokens used, for billing, when the API reported them.

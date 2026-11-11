@@ -597,8 +597,12 @@ func stat(c *ui.Context, k ink, title string, s billing.Summary) {
 			ui.Text(c, "估算").FontSize(10).TextColor(k.faint)
 		})
 		ui.Text(c, yuan(s.Cost)).FontSize(20).FontWeight(650)
-		ui.Text(c, fmt.Sprintf("搜索 %d · 阅读 %d · AI 对话 %d", s.Search, s.Fetch, s.Chat)).FontSize(11).TextColor(k.muted).SingleLine()
-		ui.Text(c, "AI 对话 "+yuan(s.ChatCost)).FontSize(11).TextColor(k.faint).SingleLine()
+		ui.Text(c, fmt.Sprintf("DeepSeek 搜索 %d · 阅读 %d · AI 对话 %d", s.Search, s.Fetch, s.Chat)).FontSize(11).TextColor(k.muted).SingleLine()
+		detail := "AI 对话 " + yuan(s.ChatCost)
+		if s.Tavily > 0 {
+			detail = fmt.Sprintf("Tavily 搜索 %d · %s；%s", s.Tavily, yuan(s.TavilyCost), detail)
+		}
+		ui.Text(c, detail).FontSize(11).TextColor(k.faint).SingleLine()
 	})
 }
 
@@ -630,7 +634,7 @@ func chart(c *ui.Context, k ink, days []billing.Day) {
 					col = k.link
 				}
 				ui.Box(c.Key(d.Date)).Grow(1).Height(bh).Radius(3, 3, 0, 0).Background(col).
-					Tooltip(fmt.Sprintf("%s  %s  搜索 %d · 阅读 %d · AI %d", d.Date[5:], yuan(d.Cost), d.Search, d.Fetch, d.Chat))
+					Tooltip(fmt.Sprintf("%s  %s  搜索 %d · Tavily %d · 阅读 %d · AI %d", d.Date[5:], yuan(d.Cost), d.Search, d.Tavily, d.Fetch, d.Chat))
 			}
 		})
 		ui.Row(c).Children(func() {

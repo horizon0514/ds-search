@@ -8,7 +8,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"ds-search/billing"
 	"ds-search/dsapi"
 
 	"github.com/egoist/mygo/ui/markdown"
@@ -43,10 +42,11 @@ type toolSearch struct {
 
 // chatBackend is what a turn needs, captured for its goroutine.
 type chatBackend struct {
-	src  source
-	ctx  context.Context
-	seq  int
-	post func(func())
+	brain llm
+	seek  searcher
+	ctx   context.Context
+	seq   int
+	post  func(func())
 }
 
 // resetChat ends the conversation: its stream and searches stop.
@@ -65,7 +65,7 @@ func (a *app) resetChat() {
 func (a *app) startChat() {
 	a.resetChat()
 	a.chatFor = a.searchKey()
-	if len(a.page1) == 0 || a.src == nil {
+	if len(a.page1) == 0 || a.brain == nil {
 		return
 	}
 	rs := dsapi.TopForAnswer(a.page1)
@@ -99,7 +99,7 @@ func (a *app) chatBusy() bool {
 // ask asks a follow-up question; the model may search the web for it.
 func (a *app) ask(q string) bool {
 	q = strings.TrimSpace(q)
-	if q == "" || a.chatBusy() || a.src == nil {
+	if q == "" || a.chatBusy() || a.brain == nil {
 		return false
 	}
 	t := &turn{question: q}
@@ -129,7 +129,7 @@ func (a *app) runTurn(t *turn, msgs []dsapi.Message, tools bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	a.chatCancel = cancel
 	t.busy = true
-	b := chatBackend{src: a.src, ctx: ctx, seq: a.chatSeq, post: a.post}
+	b := chatBackend{brain: a.brain, seek: a.seek, ctx: ctx, seq: a.chatSeq, post: a.post}
 	idx := len(a.turns) - 1
 	live := func() bool { return b.seq == a.chatSeq && ctx.Err() == nil } // on the main thread
 	a.spawn(func() {
@@ -147,7 +147,7 @@ func (a *app) runTurn(t *turn, msgs []dsapi.Message, tools bool) {
 				}
 			})
 			var r dsapi.Reply
-			r, err = b.src.Chat(ctx, msgs, offer, func(s string) {
+			r, err = b.brain.Chat(ctx, msgs, offer, func(s string) {
 				b.post(func() {
 					if live() {
 						t.answer += s
@@ -156,7 +156,7 @@ func (a *app) runTurn(t *turn, msgs []dsapi.Message, tools bool) {
 			})
 			if r.Usage != nil {
 				u := *r.Usage
-				b.post(func() { a.billChat(b.src.ModelName(), u) }) // billed, even when cut short
+				b.post(func() { a.billChat(b.brain.ModelName(), u) }) // billed, even when cut short
 			}
 			if err != nil {
 				break
@@ -227,7 +227,7 @@ func (a *app) runTool(b chatBackend, t *turn, idx int, tc dsapi.ToolCall, search
 			t.searches = append(t.searches, s)
 		}
 	})
-	rs, err := b.src.Search(b.ctx, q, n)
+	rs, err := b.seek.Search(b.ctx, q, n)
 	if err != nil {
 		b.post(func() { s.busy, s.err = false, errText(err) })
 		return "搜索失败：" + errText(err)
@@ -242,7 +242,7 @@ func (a *app) runTool(b chatBackend, t *turn, idx int, tc dsapi.ToolCall, search
 	b.post(func() {
 		s.busy, s.n = false, len(fresh)
 		if len(rs) > 0 {
-			a.bill(billing.Search)
+			a.billSearchAs(b.seek.Name())
 		}
 		if b.seq != a.chatSeq {
 			return

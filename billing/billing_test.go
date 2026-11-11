@@ -2,6 +2,7 @@ package billing
 
 import (
 	"math"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -88,5 +89,29 @@ func TestLedger(t *testing.T) {
 	}
 	if len(r.Last30) != 30 || r.Last30[29].Date != "2026-10-19" || r.Last30[29].Search != 2 || r.Last30[0].Date != "2026-09-20" {
 		t.Errorf("last30 %v … %v", r.Last30[0], r.Last30[29])
+	}
+}
+
+func TestTavilyIsItsOwnLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "usage.json")
+	l := Open(path)
+	l.now = func() time.Time { return at("2026-11-11 10:00") }
+	l.AddRequest(TavilySearch)
+	l.AddRequest(Search)
+
+	r := Open(path).Report()
+	if r.Today.Search != 1 || r.Today.Tavily != 1 || r.Today.Calls() != 2 {
+		t.Errorf("today %+v", r.Today)
+	}
+	if !near(r.Today.Cost, SearchPrice+TavilySearchPrice) || !near(r.Today.TavilyCost, TavilySearchPrice) {
+		t.Errorf("cost %+v", r.Today)
+	}
+	// The old ledger, without the Tavily fields, still loads.
+	if err := os.WriteFile(path, []byte(`[{"date":"2026-11-11","search":2,"fetch":1,"chat":1,"cost":0.02}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := Open(path).Report()
+	if old.Today.Search != 2 || old.Today.Tavily != 0 || !near(old.Today.Cost, 0.02) {
+		t.Errorf("old ledger %+v", old.Today)
 	}
 }

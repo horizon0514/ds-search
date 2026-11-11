@@ -1,8 +1,8 @@
 # DS 搜索（DS Search）
 
-macOS 菜单栏里的极简个人搜索：基于 [DeepSeek](https://platform.deepseek.com) 的 Search / Fetch / Chat API，纯 Go + [MyGo](https://github.com/egoist/mygo) 原生 UI（GPU 绘制，没有 WebView）。⌥空格 唤起，打字，回车：先搜，再总结；带 [n] 引用的 AI 总结占满面板，它读的来源收在右侧抽屉里，按 ⇥ 或 ↓ 拉出，还能联网追问。
+macOS 菜单栏里的极简个人搜索：搜索默认走 [DeepSeek](https://platform.deepseek.com) Search API，也可切到 [Tavily](https://tavily.com)，总结与阅读始终由 DeepSeek 完成；纯 Go + [MyGo](https://github.com/egoist/mygo) 原生 UI（GPU 绘制，没有 WebView）。⌥空格 唤起，打字，回车：先搜，再总结；带 [n] 引用的 AI 总结占满面板，它读的来源收在右侧抽屉里，按 ⇥ 或 ↓ 拉出，还能联网追问。
 
-> 非 DeepSeek 官方产品，与 DeepSeek（杭州深度求索）无任何关联。需要你自己的 DeepSeek API Key，费用由你的 DeepSeek 账户承担。
+> 非 DeepSeek / Tavily 官方产品，与二者均无关联。需要你自己的 DeepSeek API Key；选择 Tavily 搜索时还需要你自己的 Tavily API Key。费用分别由对应账户承担。
 
 [English](#english) · [截图](#截图) · [功能](#功能) · [安装](#安装) · [快捷键](#使用与快捷键) · [隐私](#隐私) · [开发](#从源码构建)
 
@@ -21,7 +21,7 @@ macOS 菜单栏里的极简个人搜索：基于 [DeepSeek](https://platform.dee
 ## 功能
 
 - **菜单栏常驻**，无 Dock 图标；全局快捷键 **⌥空格**（可改）唤起 Spotlight 式浮动面板，全键盘操作，支持中文输入法。
-- **网页搜索**：DeepSeek Search API，支持 `site:`、`-site:`、`"精确短语"`、`lang:`、`after:`、`before:`；无限滚动（先取 10 条，滚到底再取到 50 条）；站点图标、日期、「优质 / 权威」标记。
+- **网页搜索**：默认 DeepSeek Search API，可在设置里切到 Tavily；支持 `site:`、`-site:`、`"精确短语"`、`lang:`、`after:`、`before:`（Tavily 会把它们翻成域名与日期过滤）；无限滚动（先取 10 条，滚到底再取到 50 条）；站点图标、日期、「优质 / 权威」标记（Tavily 没有 DeepSeek 的 rerank / authority 分，因此不显示这两类标记）。
 - **阅读模式**：空格预览网页正文（DeepSeek Fetch API）。
 - **AI 总结（默认）**：每次搜索默认先搜再总结，对前 10 条结果做带 [n] 引用的总结，总结占满面板，来源默认收在右侧抽屉；⇥ 或 ↓ 拉出来源，⇧⇥ 收起抽屉、再按一次关掉总结只看结果。设置 › 通用 可默认关掉总结。可多轮追问，模型觉得来源不够时会自己再搜（Function Calling，每轮最多 2 次），点 [n] 自动拉出来源并定位。
 - **用量与费用**：本机估算今日 / 本月 / 累计花费、近 30 天柱状图、账户余额、低余额和月度预算提醒。
@@ -39,6 +39,7 @@ macOS 菜单栏里的极简个人搜索：基于 [DeepSeek](https://platform.dee
      xattr -dr com.apple.quarantine "/Applications/DS Search.app"
      ```
 3. 首次启动会进入设置，粘贴你的 DeepSeek API Key（在 [platform.deepseek.com](https://platform.deepseek.com/api_keys) 创建）→「验证并保存」。
+4. 想用 Tavily 搜索：设置 › API Key › 网页搜索源选「Tavily」，粘贴 [Tavily API Key](https://app.tavily.com/home) →「验证并保存」。总结仍用 DeepSeek。
 
 ### 从源码构建
 
@@ -59,11 +60,12 @@ codesign --force --deep -s - -i dev.horizon.dssearch -r='designated => identifie
 
 ## API Key 与费用（自带 Key）
 
-DS 搜索不提供任何服务端，所有请求都用你自己的 DeepSeek API Key、从你的电脑直接发到 DeepSeek。
+DS 搜索不提供任何服务端，所有请求都用你自己的 Key、从你的电脑直接发到对应平台。
 
-- Search、Fetch（阅读模式）各 **¥5 / 1000 次**（¥0.005/次），只对有结果的成功请求计费；每次搜索算 1 次，与返回条数无关。
-- AI 对话按 `deepseek-flash` 的 token 计费：一次总结约 3–5k 输入 token；带搜索的追问多 1–2 次调用外加每次搜索 ¥0.005，一般在几分钱以内。
-- 应用里的金额是本机估算，**以 [DeepSeek 账单](https://platform.deepseek.com/usage) 为准**；价格表在 `billing/billing.go`，DeepSeek 调价时可能过时。
+- **DeepSeek（必需）**：Search、Fetch（阅读模式）各 **¥5 / 1000 次**（¥0.005/次），只对有结果的成功请求计费；每次搜索算 1 次，与返回条数无关。AI 总结与追问按 `deepseek-flash` 的 token 计费：一次总结约 3–5k 输入 token；带搜索的追问多 1–2 次调用外加搜索费用，一般在几分钱以内。
+- **Tavily（可选）**：网页搜索约 **$8 / 1000 次**（$0.008/次），Tavily 单独向你的账户计费；同样只对成功返回结果的搜索计费。应用按约 7.1 的汇率折算成人民币估算。验证 Key 会发起 1 次最小搜索，计 1 次费用。
+- 两个 Key 分开保存、互不覆盖：DeepSeek Key 用于总结、阅读和默认搜索；Tavily Key 只在选择 Tavily 搜索时使用。搜索源切到 Tavily 却没有 Key 时，会明确提示，不会悄悄退回 DeepSeek。
+- 应用里的金额是本机估算，**分别以 [DeepSeek 账单](https://platform.deepseek.com/usage) 与 [Tavily 账单](https://app.tavily.com/home) 为准**；价格表在 `billing/billing.go`，调价时可能过时。
 
 ## 使用与快捷键
 
@@ -119,9 +121,11 @@ DS 搜索不提供任何服务端，所有请求都用你自己的 DeepSeek API 
 
 通用 的第一项是「搜索后自动 AI 总结」（默认开）。总结默认占满面板，来源抽屉默认收起。关掉总结后，回车只搜索、不调用 Chat API，按 ⇥ 打开对话时才开始总结；此时结果已经在屏上，会立即补一次总结。
 
+API Key 的第一项是「网页搜索源」：`DeepSeek（默认）` 或 `Tavily`。选 Tavily 后才显示 Tavily Key 输入框，可验证、更换、删除；保存位置（钥匙串 / 本地文件）对两个 Key 同时生效。总结模型固定为 DeepSeek，不随搜索源改变。
+
 ## 用量与费用（设置 › 用量与费用，⌘U，或菜单栏）
 
-- 本机账本 `~/Library/Application Support/DS Search/usage.json`，按天汇总：搜索、阅读（各 ¥0.005/次成功请求）和 AI 对话（每次调用都算，包括工具调用的中间轮次；按接口返回的 usage：缓存命中/未命中输入、输出 token × deepseek-flash 单价，区分北京时间高峰 9–12、14–18 点工作日与空闲时段半价）。失败、无结果的请求不记账。AI 追问时模型自己发起的搜索也按 ¥0.005/次 记入「搜索」。
+- 本机账本 `~/Library/Application Support/DS Search/usage.json`，按天汇总：DeepSeek 搜索、阅读（各 ¥0.005/次成功请求）、Tavily 搜索（约 ¥0.057/次）和 AI 对话（每次调用都算，包括工具调用的中间轮次；按接口返回的 usage：缓存命中/未命中输入、输出 token × deepseek-flash 单价，区分北京时间高峰 9–12、14–18 点工作日与空闲时段半价）。失败、无结果的请求不记账。AI 追问时模型自己发起的搜索也按当前搜索源分别记入「DeepSeek 搜索」或「Tavily 搜索」。
 - 显示今日 / 本月 / 累计估算金额和各类次数、近 30 天柱状图、账户余额（`GET /user/balance`，打开设置/用量页时刷新，每 20 次计费调用后自动刷新）。
 - 余额低于提醒线（默认 ¥5）或本月估算超过月度预算（可选）时，面板顶部显示提醒条。
 - 菜单栏右键第一行显示「今日 ¥0.12（估算）· 余额 ¥98.30」。
@@ -130,9 +134,9 @@ DS 搜索不提供任何服务端，所有请求都用你自己的 DeepSeek API 
 
 ## 隐私
 
-- **API Key** 保存在 macOS「登录」钥匙串（服务名 `dev.horizon.dssearch`，账户 `deepseek-api-key`）；钥匙串不可用时可改用备用文件 `~/Library/Application Support/DS Search/api-key`（权限 0600）。Key 不写日志、不上传到别处。
-- **没有遥测、没有统计、没有自己的服务器。** API 请求只发往 `api.deepseek.com`。另外，结果列表里的站点图标是直接从结果网站（及 DeepSeek 返回的图标地址）加载的；你打开、预览的网页由浏览器或 DeepSeek Fetch 获取。
-- 本机数据都在 `~/Library/Application Support/DS Search/`：`config.json`（快捷键、搜索历史、面板尺寸等，不含 Key）、`usage.json`（用量账本）。AI 对话只在内存里，不落盘。搜索历史可在设置里关闭或清空。
+- **API Key** 保存在 macOS「登录」钥匙串（服务名 `dev.horizon.dssearch`；账户 `deepseek-api-key` 与 `tavily-api-key`）；钥匙串不可用时可改用备用文件 `…/DS Search/api-key` 与 `…/DS Search/tavily-key`（权限 0600）。Key 不写日志、不上传到别处。
+- **没有遥测、没有统计、没有自己的服务器。** API 请求只发往 `api.deepseek.com`；搜索源选 Tavily 时，搜索请求发往 `api.tavily.com`。另外，结果列表里的站点图标是直接从结果网站（及搜索 API 返回的图标地址）加载的；你打开、预览的网页由浏览器或 DeepSeek Fetch 获取。
+- 本机数据都在 `~/Library/Application Support/DS Search/`：`config.json`（快捷键、搜索历史、搜索源、面板尺寸等，不含 Key）、`usage.json`（用量账本）。AI 对话只在内存里，不落盘。搜索历史可在设置里关闭或清空。
 
 ## 路线图
 
@@ -152,7 +156,7 @@ go vet ./... && go test -short ./...          # 单元测试 + 无窗口的界�
 DEEPSEEK_API_KEY=sk-... go test ./...          # 加上真实 API 测试（会产生少量费用），并把截图渲染到 shots/
 ```
 
-目录：`billing/`（价格表、费用计算、本地账本，含单元测试）、`usage.go`（用量页逻辑）、`dsapi/`（Search/Fetch/Answer 客户端，含真实 API 测试）、`model.go`（状态与动作）、`view.go`（界面）、`main.go`（菜单栏、面板、全局快捷键）、`config.go`（配置）、`keystore.go`（钥匙串、迁移与本地文件备用）、`settings.go`（设置分页）。
+目录：`billing/`（价格表、费用计算、本地账本，含单元测试）、`usage.go`（用量页逻辑）、`dsapi/`（Search/Fetch/Answer 客户端，含真实 API 测试）、`websearch/`（Tavily 适配与查询语法转换）、`model.go`（状态与动作）、`view.go`（界面）、`main.go`（菜单栏、面板、全局快捷键）、`config.go`（配置）、`keystore.go`（钥匙串、迁移与本地文件备用）、`settings.go`（设置分页）。
 
 ## 致谢
 
@@ -164,7 +168,7 @@ DEEPSEEK_API_KEY=sk-... go test ./...          # 加上真实 API 测试（会�
 
 ## 免责声明
 
-本项目是个人开源项目，**不是 DeepSeek 官方产品，与 DeepSeek 没有任何隶属、合作或背书关系**。DeepSeek 名称与商标归其所有者。使用本软件产生的 API 费用由你自己的 DeepSeek 账户承担；费用估算仅供参考。软件按「原样」提供，不作任何担保。
+本项目是个人开源项目，**不是 DeepSeek 或 Tavily 官方产品，与二者没有任何隶属、合作或背书关系**。相关名称与商标归其所有者。使用本软件产生的 API 费用由你自己的 DeepSeek / Tavily 账户承担；费用估算仅供参考。软件按「原样」提供，不作任何担保。
 
 ## 许可证
 
@@ -174,14 +178,14 @@ DEEPSEEK_API_KEY=sk-... go test ./...          # 加上真实 API 测试（会�
 
 ## English
 
-**DS Search** is a tiny macOS menu-bar search app built on the [DeepSeek](https://platform.deepseek.com) Search, Fetch and Chat APIs, with a native GPU-rendered UI in pure Go via [MyGo](https://github.com/egoist/mygo) (no WebView).
+**DS Search** is a tiny macOS menu-bar search app built on the [DeepSeek](https://platform.deepseek.com) Search, Fetch and Chat APIs, with an optional [Tavily](https://tavily.com) web search backend, and a native GPU-rendered UI in pure Go via [MyGo](https://github.com/egoist/mygo) (no WebView).
 
 - Press **⌥Space** for a Spotlight-style panel; type, hit **Enter**: it searches, then the AI summarizes. The answer with its [n] citations fills the panel; the web results are a **sources** drawer on the right, closed until **Tab** or **Down** slides it in. **Shift+Tab** closes the drawer, then the answer, leaving results-only search; **Esc** hides the panel. Infinite scroll, site icons, reader mode (Space).
 - Follow-up questions and agentic web search work from the answer, when the model thinks the sources aren't enough. Summarizing is on by default; Settings → General turns it off, and then a search costs nothing but the search.
 - Usage & cost estimates, balance and budget alerts; light/dark themes; resizable panes.
-- **Bring your own DeepSeek API key.** Search/Fetch cost ¥0.005 per successful request; chat is billed by tokens on your own DeepSeek account.
-- **Privacy:** the key is stored in the macOS login keychain (or an optional 0600 file); no telemetry and no server of our own. API calls go only to `api.deepseek.com`; result favicons load from the result sites.
+- **Bring your own keys.** DeepSeek is required for summaries, reading and default search; Tavily is optional, selectable as the search source, and billed separately. Search/Fetch cost ¥0.005 per successful request on DeepSeek; Tavily is about $8 / 1000 searches.
+- **Privacy:** keys are stored in the macOS login keychain (or optional 0600 files); no telemetry and no server of our own. API calls go to `api.deepseek.com`, and to `api.tavily.com` only when Tavily search is selected; result favicons load from the result sites.
 - **Install:** download the universal zip from Releases (ad-hoc signed, not notarized: right-click → Open, or `xattr -dr com.apple.quarantine "/Applications/DS Search.app"`), or build with Go 1.27+: `go tool mygo build -platform darwin/universal`.
 - The UI is in Chinese for now; an English UI is on the roadmap.
 
-Not affiliated with, endorsed by, or sponsored by DeepSeek. MIT licensed.
+Not affiliated with, endorsed by, or sponsored by DeepSeek or Tavily. MIT licensed.

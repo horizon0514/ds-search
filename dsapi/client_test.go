@@ -138,6 +138,24 @@ func TestTopForAnswer(t *testing.T) {
 	}
 }
 
+// Tavily has no DeepSeek rerank scores: with all zero, the search order
+// is the answer's order, and still only ten.
+func TestTopForAnswerWithoutScores(t *testing.T) {
+	var rs []Result
+	for i := 0; i < 14; i++ {
+		rs = append(rs, Result{URL: string(rune('a' + i))})
+	}
+	top := TopForAnswer(rs)
+	if len(top) != MaxAnswerSources {
+		t.Fatalf("%d", len(top))
+	}
+	for i, r := range top {
+		if r.URL != rs[i].URL {
+			t.Fatalf("order changed at %d: %q", i, r.URL)
+		}
+	}
+}
+
 func TestBadKey(t *testing.T) {
 	live(t)
 	c := New("sk-invalid")

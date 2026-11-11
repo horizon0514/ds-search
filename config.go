@@ -14,6 +14,7 @@ type config struct {
 	AI       bool   `json:"ai"`                // the conversation open on the right: a search summarizes
 	Sources  bool   `json:"sources,omitempty"` // the sources drawer beside the summary, closed by default
 	Model    string `json:"model,omitempty"`   // chat model
+	Source   string `json:"source,omitempty"`  // web search provider: "" DeepSeek, or "tavily"
 	// Billing: warn under this balance (¥), and over this month's budget (¥, 0 for none).
 	LowBalance    float64  `json:"lowBalance"`
 	MonthlyBudget float64  `json:"monthlyBudget,omitempty"`
@@ -34,6 +35,7 @@ const (
 	defaultShortcut  = "Alt+Space"
 	fallbackShortcut = "Alt+Shift+Space"
 	secretKey        = "deepseek-api-key"
+	tavilySecretKey  = "tavily-api-key"
 	maxHistory       = 30
 )
 

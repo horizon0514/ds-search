@@ -12,19 +12,35 @@ import (
 
 	"ds-search/billing"
 	"ds-search/dsapi"
+	"ds-search/websearch"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 )
 
-// source is what the app needs of DeepSeek; tests give a fake one.
-type source interface {
+// The app is built on three roles, so the web search provider can differ
+// from the model that reads and summarizes its results.
+type searcher interface {
 	Search(ctx context.Context, q string, n int) ([]dsapi.Result, error)
+	Name() string
+}
+
+type reader interface {
 	Fetch(ctx context.Context, url string) (dsapi.Page, error)
+}
+
+type llm interface {
 	Chat(ctx context.Context, msgs []dsapi.Message, tools []dsapi.Tool, onDelta func(string)) (dsapi.Reply, error)
 	Check(ctx context.Context) error
 	GetBalance(ctx context.Context) (dsapi.AccountBalance, error)
 	ModelName() string
+}
+
+// source is all three at once: the DeepSeek client, or a test fake.
+type source interface {
+	searcher
+	reader
+	llm
 }
 
 const (
@@ -55,11 +71,16 @@ var tabNames = []string{"通用", "API Key", "用量与费用", "快捷键", "�
 // work on goroutines (spawn) hands results back through post.
 type app struct {
 	cfg     config
-	src     source
-	newSrc  func(key string) source
+	seek    searcher
+	fetch   reader
+	brain   llm
+	newSrc  func(config, string, string) source
 	keyFrom string // "keychain", "file", "env" or ""
 	key     string // shown masked
 	keyErr  string // the keychain could not be read
+	tvKey   string // Tavily, shown masked
+	tvFrom  string
+	tvErr   string
 	keys    keyStore
 	dataDir string
 
@@ -121,9 +142,11 @@ type app struct {
 	// Settings
 	tab          int
 	changingKey  bool // the key input shows over the saved key
+	tvChanging   bool // the Tavily key input shows over the saved key
 	confirmClear bool // 清空 the history: once more to confirm
 	panesW       float32
 	editKey      string
+	tvEdit       string
 	editShortcut string
 	settingsMsg  string
 	settingsErr  bool
@@ -156,11 +179,12 @@ type app struct {
 	asked map[string]bool
 }
 
-func newApp(cfg config, key, from string, newSrc func(string) source) *app {
-	a := &app{cfg: cfg, newSrc: newSrc, keyFrom: from, key: key, icons: map[string]*ui.Bitmap{}, asked: map[string]bool{}, chosen: -1}
+func newApp(cfg config, key, from, tavilyKey string, newSrc func(config, string, string) source) *app {
+	a := &app{cfg: cfg, newSrc: newSrc, keyFrom: from, key: key, tvKey: tavilyKey,
+		icons: map[string]*ui.Bitmap{}, asked: map[string]bool{}, chosen: -1}
 	a.keys = keyStore{secrets: mygoSecrets{}, env: os.Getenv}
 	if key != "" {
-		a.src = newSrc(key)
+		a.bind(newSrc(cfg, key, tavilyKey))
 	} else {
 		a.page, a.tab = pageSettings, tabKey
 	}
@@ -182,7 +206,23 @@ func newApp(cfg config, key, from string, newSrc func(string) source) *app {
 	return a
 }
 
-func (a *app) configured() bool { return a.src != nil }
+func (a *app) bind(src source) {
+	if src == nil {
+		a.seek, a.fetch, a.brain = nil, nil, nil
+		return
+	}
+	a.seek, a.fetch, a.brain = src, src, src
+}
+
+func (a *app) rebuildSource() {
+	if a.key == "" {
+		a.bind(nil)
+		return
+	}
+	a.bind(a.newSrc(a.cfg, a.key, a.tvKey))
+}
+
+func (a *app) configured() bool { return a.seek != nil && a.brain != nil }
 
 // submit runs what Enter means: a new search, or opening the chosen row.
 func (a *app) submit() {
@@ -199,7 +239,7 @@ func (a *app) submit() {
 
 func (a *app) search() {
 	q := strings.TrimSpace(a.query)
-	if q == "" || a.src == nil {
+	if q == "" || a.seek == nil {
 		return
 	}
 	a.seq++
@@ -211,10 +251,11 @@ func (a *app) search() {
 		a.cfg.History = remember(a.cfg.History, q)
 	}
 	a.changed(a.cfg)
-	src := a.src
+	search := a.seek
+	provider := search.Name()
 	start := time.Now()
 	a.spawn(func() {
-		rs, err := src.Search(context.Background(), q, pageSize)
+		rs, err := search.Search(context.Background(), q, pageSize)
 		took := time.Since(start)
 		a.post(func() {
 			if seq != a.seq {
@@ -228,7 +269,7 @@ func (a *app) search() {
 				return
 			}
 			if len(rs) > 0 {
-				a.bill(billing.Search)
+				a.billSearchAs(provider)
 			}
 			a.all = dedupe(nil, rs)
 			a.page1, a.results = a.all, a.all
@@ -279,9 +320,10 @@ func (a *app) loadMore() {
 		return
 	}
 	a.expanding, a.expandErr = true, ""
-	q, src, seq := a.searched, a.src, a.seq
+	q, search, seq := a.searched, a.seek, a.seq
+	provider := search.Name()
 	a.spawn(func() {
-		rs, err := src.Search(context.Background(), q, maxResults)
+		rs, err := search.Search(context.Background(), q, maxResults)
 		a.post(func() {
 			if seq != a.seq {
 				return
@@ -292,7 +334,7 @@ func (a *app) loadMore() {
 				return
 			}
 			if len(rs) > 0 {
-				a.bill(billing.Search)
+				a.billSearchAs(provider)
 			}
 			a.all = dedupe(a.all, rs)
 			if a.srcSet == 0 {
@@ -353,9 +395,9 @@ func (a *app) read() {
 	}
 	a.readerURL, a.readerTitle, a.readerText, a.readerErr, a.readerBusy = r.URL, r.Title, "", "", true
 	a.readerScroll.X, a.readerScroll.Y = 0, 0
-	src, u := a.src, r.URL
+	fetch, u := a.fetch, r.URL
 	a.spawn(func() {
-		p, err := src.Fetch(context.Background(), u)
+		p, err := fetch.Fetch(context.Background(), u)
 		a.post(func() {
 			if a.readerURL != u {
 				return
@@ -402,7 +444,8 @@ func (a *app) openSettings() { a.openTab(a.tab) }
 // openTab opens the settings at tab.
 func (a *app) openTab(tab int) {
 	if a.page != pageSettings {
-		a.editKey, a.editShortcut, a.settingsMsg, a.settingsErr, a.changingKey = "", a.cfg.Shortcut, "", false, false
+		a.editKey, a.tvEdit, a.editShortcut, a.settingsMsg, a.settingsErr = "", "", a.cfg.Shortcut, "", false
+		a.changingKey, a.tvChanging = false, false
 		a.editLow, a.editBudget, a.usageMsg = num(a.cfg.LowBalance), num(a.cfg.MonthlyBudget), ""
 		if a.cfg.MonthlyBudget == 0 {
 			a.editBudget = ""
@@ -424,7 +467,7 @@ func (a *app) saveKey() {
 		return
 	}
 	a.checking, a.settingsMsg, a.settingsErr = true, "正在验证…", false
-	src, ks, mode := a.newSrc(key), a.keys, a.cfg.KeyStore
+	src, ks, mode := a.newSrc(a.cfg, key, a.tvKey), a.keys, a.cfg.KeyStore
 	a.spawn(func() {
 		err := src.Check(context.Background())
 		var from, warn string
@@ -437,8 +480,9 @@ func (a *app) saveKey() {
 				a.settingsMsg, a.settingsErr = errText(err), true
 				return
 			}
-			first := a.src == nil
-			a.src, a.keyFrom, a.key, a.editKey, a.changingKey, a.keyErr = src, from, key, "", false, ""
+			first := !a.configured()
+			a.bind(src)
+			a.keyFrom, a.key, a.editKey, a.changingKey, a.keyErr = from, key, "", false, ""
 			switch {
 			case warn != "": // and from now on, not the keychain
 				a.cfg.KeyStore = "file"
@@ -463,11 +507,97 @@ func (a *app) deleteKey() {
 		a.settingsMsg, a.settingsErr = "删除失败："+err.Error(), true
 		return
 	}
-	a.src, a.key, a.keyFrom, a.changingKey, a.keyErr = nil, "", "", false, ""
+	a.key, a.keyFrom, a.changingKey, a.keyErr = "", "", false, ""
 	if k := strings.TrimSpace(a.keys.env("DEEPSEEK_API_KEY")); k != "" {
-		a.src, a.key, a.keyFrom = a.newSrc(k), k, "env"
+		a.bind(a.newSrc(a.cfg, k, a.tvKey))
+		a.key, a.keyFrom = k, "env"
+	} else {
+		a.rebuildSource()
 	}
 	a.settingsMsg, a.settingsErr = "已删除", false
+}
+
+// saveTavilyKey checks the Tavily key with one minimal search, then keeps it.
+func (a *app) saveTavilyKey() {
+	key := strings.TrimSpace(a.tvEdit)
+	if key == "" || a.checking {
+		return
+	}
+	a.checking, a.settingsMsg, a.settingsErr = true, "正在验证 Tavily Key…", false
+	ks, mode := a.keys, a.cfg.KeyStore
+	a.spawn(func() {
+		err := websearch.NewTavily(key).Check(context.Background())
+		var from, warn string
+		if err == nil {
+			from, warn, err = ks.saveTavily(key, mode)
+		}
+		a.post(func() {
+			a.checking = false
+			if err != nil {
+				a.settingsMsg, a.settingsErr = errText(err), true
+				return
+			}
+			a.tvKey, a.tvFrom, a.tvErr = key, from, ""
+			a.tvEdit, a.tvChanging = "", false
+			a.cfg.Source = "tavily"
+			a.changed(a.cfg)
+			a.rebuildSource()
+			switch {
+			case warn != "":
+				a.cfg.KeyStore = "file"
+				a.changed(a.cfg)
+				a.settingsMsg, a.settingsErr = warn+"，已改存到本地文件（备用）", true
+			default:
+				a.settingsMsg, a.settingsErr = "Tavily Key 已验证，搜索源已切到 Tavily", false
+			}
+		})
+	})
+}
+
+// deleteTavilyKey forgets the Tavily key; the search goes back to DeepSeek
+// unless TAVILY_API_KEY supplies another.
+func (a *app) deleteTavilyKey() {
+	if err := a.keys.removeTavily(); err != nil {
+		a.settingsMsg, a.settingsErr = "删除失败："+err.Error(), true
+		return
+	}
+	a.tvKey, a.tvFrom, a.tvErr, a.tvChanging = "", "", "", false
+	if k := strings.TrimSpace(a.keys.env("TAVILY_API_KEY")); k != "" {
+		a.tvKey, a.tvFrom = k, "env"
+	} else if a.cfg.Source == "tavily" {
+		a.cfg.Source = ""
+		a.changed(a.cfg)
+	}
+	a.rebuildSource()
+	a.settingsMsg, a.settingsErr = "Tavily Key 已删除", false
+}
+
+// reloadTavilyKey reads the key again, as after allowing the keychain.
+func (a *app) reloadTavilyKey() {
+	st := a.keys.loadTavily(a.cfg.KeyStore)
+	a.tvErr = st.err
+	if st.key != "" {
+		a.tvKey, a.tvFrom = st.key, st.from
+		a.rebuildSource()
+		a.settingsMsg, a.settingsErr = "已读取 Tavily Key", false
+	} else {
+		a.settingsMsg, a.settingsErr = "仍然读不到 Tavily Key", true
+	}
+}
+
+// setSource switches the web search provider.
+func (a *app) setSource(source string) {
+	if source == a.cfg.Source {
+		return
+	}
+	a.cfg.Source = source
+	a.changed(a.cfg)
+	a.rebuildSource()
+	if source == "tavily" && a.tvKey == "" {
+		a.settingsMsg, a.settingsErr = "已切到 Tavily，请先填入并验证 Tavily API Key", true
+		return
+	}
+	a.settingsMsg, a.settingsErr = "搜索源已切换", false
 }
 
 // reloadKey reads the key again, as after allowing the keychain.
@@ -475,7 +605,8 @@ func (a *app) reloadKey() {
 	st := a.keys.load(a.cfg.KeyStore)
 	a.keyErr = st.err
 	if st.key != "" {
-		a.src, a.key, a.keyFrom = a.newSrc(st.key), st.key, st.from
+		a.bind(a.newSrc(a.cfg, st.key, a.tvKey))
+		a.key, a.keyFrom = st.key, st.from
 		a.settingsMsg, a.settingsErr = "已读取", false
 	} else {
 		a.settingsMsg, a.settingsErr = "仍然读不到", true
@@ -489,17 +620,35 @@ func (a *app) setKeyStore(mode string) {
 	}
 	a.cfg.KeyStore = mode
 	a.changed(a.cfg)
-	if a.key == "" || a.keyFrom == "env" {
+	moved, movedTo, warned := false, "", ""
+	if a.key != "" && a.keyFrom != "env" {
+		from, warn, err := a.keys.save(a.key, mode)
+		if err != nil {
+			a.settingsMsg, a.settingsErr = errText(err), true
+			return
+		}
+		a.keyFrom, moved, movedTo = from, true, from
+		warned = warn
+	}
+	if a.tvKey != "" && a.tvFrom != "env" {
+		from, warn, err := a.keys.saveTavily(a.tvKey, mode)
+		if err != nil {
+			a.settingsMsg, a.settingsErr = "Tavily Key 移动失败："+errText(err), true
+			return
+		}
+		a.tvFrom, moved, movedTo = from, true, from
+		if warned == "" {
+			warned = warn
+		}
+	}
+	if !moved {
 		return
 	}
-	from, warn, err := a.keys.save(a.key, mode)
 	switch {
-	case err != nil:
-		a.settingsMsg, a.settingsErr = errText(err), true
-	case warn != "":
-		a.keyFrom, a.settingsMsg, a.settingsErr = from, warn+"，仍存在本地文件", true
+	case warned != "":
+		a.settingsMsg, a.settingsErr = warned+"，仍存在本地文件", true
 	default:
-		a.keyFrom, a.settingsMsg, a.settingsErr = from, "已移到"+storeName(from), false
+		a.settingsMsg, a.settingsErr = "已移到"+storeName(movedTo), false
 	}
 }
 
@@ -513,6 +662,13 @@ func storeName(from string) string {
 		return "环境变量 DEEPSEEK_API_KEY"
 	}
 	return "未保存"
+}
+
+func storeNameFor(from, envName string) string {
+	if from == "env" {
+		return "环境变量 " + envName
+	}
+	return storeName(from)
 }
 
 // forget deletes history item i; clearHistory all of it.

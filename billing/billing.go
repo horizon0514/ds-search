@@ -1,6 +1,7 @@
 // Package billing estimates what ds-search costs: a local ledger of the
-// billable calls it made, priced with DeepSeek's published prices. The
-// authoritative bill is on platform.deepseek.com; these are estimates.
+// billable calls it made, priced with DeepSeek's and Tavily's published
+// prices. The authoritative bills are on their platforms; these are
+// estimates.
 package billing
 
 import (
@@ -18,6 +19,8 @@ var (
 	// SearchPrice and FetchPrice are per successful request: 5 元 / 1000.
 	SearchPrice = 0.005
 	FetchPrice  = 0.005
+	// TavilySearchPrice is per search: about $8 / 1000, in yuan at 7.1.
+	TavilySearchPrice = 0.057
 	// Models are priced per million tokens at peak hours; off-peak is half.
 	Models = map[string]ModelPrice{
 		"deepseek-flash":  {CacheHit: 0.04, CacheMiss: 2, Output: 8},
@@ -70,20 +73,23 @@ func ChatCost(model string, u Usage, t time.Time) float64 {
 type Kind string
 
 const (
-	Search Kind = "search" // 搜索
-	Fetch  Kind = "fetch"  // 阅读
-	Chat   Kind = "chat"   // AI 对话: each chat completion
+	Search       Kind = "search"        // DeepSeek 搜索
+	TavilySearch Kind = "tavily-search" // Tavily 搜索
+	Fetch        Kind = "fetch"         // 阅读
+	Chat         Kind = "chat"          // AI 对话: each chat completion
 )
 
 // Day is a day's usage.
 type Day struct {
-	Date   string  `json:"date"` // 2006-01-02, Beijing time
-	Search int     `json:"search"`
-	Fetch  int     `json:"fetch"`
-	Chat   int     `json:"chat"`
-	Tokens int     `json:"tokens,omitempty"`
-	Cost   float64 `json:"cost"`               // yuan, all kinds
-	ChatC  float64 `json:"chatCost,omitempty"` // yuan, of chats
+	Date    string  `json:"date"` // 2006-01-02, Beijing time
+	Search  int     `json:"search"`
+	Tavily  int     `json:"tavily,omitempty"`
+	Fetch   int     `json:"fetch"`
+	Chat    int     `json:"chat"`
+	Tokens  int     `json:"tokens,omitempty"`
+	Cost    float64 `json:"cost"`               // yuan, all kinds
+	ChatC   float64 `json:"chatCost,omitempty"` // yuan, of chats
+	TavilyC float64 `json:"tavilyCost,omitempty"`
 }
 
 // Ledger keeps a Day per day in a JSON file. Safe for concurrent use.
@@ -126,6 +132,10 @@ func (l *Ledger) AddRequest(k Kind) {
 	case Search:
 		d.Search++
 		d.Cost += SearchPrice
+	case TavilySearch:
+		d.Tavily++
+		d.Cost += TavilySearchPrice
+		d.TavilyC += TavilySearchPrice
 	case Fetch:
 		d.Fetch++
 		d.Cost += FetchPrice
@@ -171,20 +181,22 @@ func (l *Ledger) save() {
 
 // Summary is the usage of a span of days.
 type Summary struct {
-	Search, Fetch, Chat int
-	Cost, ChatCost      float64
+	Search, Tavily, Fetch, Chat int
+	Cost, ChatCost, TavilyCost  float64
 }
 
 func (s *Summary) add(d *Day) {
 	s.Search += d.Search
+	s.Tavily += d.Tavily
 	s.Fetch += d.Fetch
 	s.Chat += d.Chat
 	s.Cost += d.Cost
 	s.ChatCost += d.ChatC
+	s.TavilyCost += d.TavilyC
 }
 
 // Calls is how many billable calls the summary counts.
-func (s Summary) Calls() int { return s.Search + s.Fetch + s.Chat }
+func (s Summary) Calls() int { return s.Search + s.Tavily + s.Fetch + s.Chat }
 
 // Report is today's, this month's and all usage, and the last 30 days.
 type Report struct {

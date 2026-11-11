@@ -17,6 +17,17 @@ func (a *app) bill(k billing.Kind) {
 	a.billed()
 }
 
+// billSearch records a successful web search, with the provider that served it.
+func (a *app) billSearch() { a.billSearchAs(a.seek.Name()) }
+
+func (a *app) billSearchAs(provider string) {
+	if provider == "tavily" {
+		a.bill(billing.TavilySearch)
+		return
+	}
+	a.bill(billing.Search)
+}
+
 func (a *app) billChat(model string, u dsapi.Usage) {
 	a.ledger.AddChat(model, billing.Usage{PromptCacheHit: u.PromptCacheHit, PromptCacheMiss: u.PromptCacheMiss, Completion: u.Completion})
 	a.billed()
@@ -32,13 +43,13 @@ func (a *app) billed() {
 
 // refreshBalance reads the balance, unless it was read within a minute.
 func (a *app) refreshBalance(force bool) {
-	if a.src == nil || a.balBusy || (!force && time.Since(a.balAt) < time.Minute) {
+	if a.brain == nil || a.balBusy || (!force && time.Since(a.balAt) < time.Minute) {
 		return
 	}
 	a.balBusy, a.sinceBalance = true, 0
-	src := a.src
+	brain := a.brain
 	a.spawn(func() {
-		b, err := src.GetBalance(context.Background())
+		b, err := brain.GetBalance(context.Background())
 		a.post(func() {
 			a.balBusy, a.balAt = false, time.Now()
 			if err != nil {

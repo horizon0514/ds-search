@@ -126,6 +126,56 @@ func TestKeyStoreMigrates(t *testing.T) {
 	}
 }
 
+// The Tavily key lives beside the DeepSeek key, never over it.
+func TestTavilyKey(t *testing.T) {
+	sec := &memSecrets{}
+	ks := keyStore{secrets: sec, dir: t.TempDir(), env: noEnv}
+	if from, warn, err := ks.save(testKey, ""); from != "keychain" || warn != "" || err != nil {
+		t.Fatalf("deepseek save: %q %q %v", from, warn, err)
+	}
+	tv := "tvly-12345678"
+	if from, warn, err := ks.saveTavily(tv, ""); from != "keychain" || warn != "" || err != nil {
+		t.Fatalf("tavily save: %q %q %v", from, warn, err)
+	}
+	if st := ks.loadTavily(""); st.key != tv || st.from != "keychain" {
+		t.Errorf("tavily reload: %+v", st)
+	}
+	if st := ks.load(""); st.key != testKey {
+		t.Errorf("deepseek replaced: %+v", st)
+	}
+	if got := maskKey(tv); got != "tvly-••••5678" {
+		t.Errorf("masked %q", got)
+	}
+	if from, _, err := ks.saveTavily(tv, "file"); from != "file" || err != nil {
+		t.Fatalf("tavily to file: %q %v", from, err)
+	}
+	if b, err := os.ReadFile(ks.pathOf(tavilyKeyFile)); err != nil || strings.TrimSpace(string(b)) != tv {
+		t.Errorf("tavily file: %q %v", b, err)
+	}
+	if _, err := os.Stat(ks.path()); !errors.Is(err, os.ErrNotExist) {
+		t.Error("deepseek file appeared")
+	}
+	if err := ks.removeTavily(); err != nil {
+		t.Fatal(err)
+	}
+	if st := ks.loadTavily(""); st.key != "" {
+		t.Error("tavily kept after delete")
+	}
+	if st := ks.load(""); st.key != testKey {
+		t.Error("deepseek removed with tavily")
+	}
+	// TAVILY_API_KEY is the fallback, separate from DEEPSEEK_API_KEY.
+	env := keyStore{secrets: sec, dir: t.TempDir(), env: func(k string) string {
+		if k == "TAVILY_API_KEY" {
+			return tv
+		}
+		return ""
+	}}
+	if st := env.loadTavily(""); st.key != tv || st.from != "env" {
+		t.Errorf("tavily env: %+v", st)
+	}
+}
+
 func TestKeyStoreFileMode(t *testing.T) {
 	sec := &memSecrets{}
 	ks := keyStore{secrets: sec, dir: filepath.Join(t.TempDir(), "DS Search"), env: noEnv}
@@ -183,6 +233,33 @@ func TestSettingsSavedKey(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("重试读取") || !tt.HasText("改用本地文件") {
 		t.Error("no way out of a failing keychain")
+	}
+}
+
+// The API Key tab switches the search provider, and only then shows the
+// Tavily key it needs.
+func TestSearchSourceSettings(t *testing.T) {
+	a, _ := testApp(&fake{results: canned})
+	a.openTab(tabKey)
+	tt := ui.NewTester(a.view, panelWidth, panelHeight)
+	if !tt.HasText("DeepSeek（默认）") || tt.HasText("Tavily API Key") {
+		t.Fatalf("default: %q", tt.Texts())
+	}
+	if err := tt.Click("Tavily"); err != nil {
+		t.Fatal(err)
+	}
+	if a.cfg.Source != "tavily" || a.seek == nil {
+		t.Errorf("source %q, configured %v", a.cfg.Source, a.configured())
+	}
+	if !tt.HasText("Tavily API Key") || !tt.HasText("还没有 Tavily Key") {
+		t.Errorf("no Tavily key UI: %q", tt.Texts())
+	}
+	a.tvKey = "tvly-12345678"
+	a.tvFrom = "keychain"
+	a.setSource("")
+	tt.Frame()
+	if a.cfg.Source != "" || tt.HasText("Tavily API Key") {
+		t.Errorf("back to DeepSeek: %q %q", a.cfg.Source, tt.Texts())
 	}
 }
 
