@@ -212,16 +212,16 @@ func TestPaneKeys(t *testing.T) {
 	if len(first) != 2 || !strings.Contains(first[1].Content, "orig 1") || !strings.Contains(first[1].Content, "新的") {
 		t.Errorf("new conversation's first message %+v", first)
 	}
-	// Esc collapses; esc hides.
+	// esc hides the panel at once; ⇧⇥ is what closes the conversation.
 	hidden := 0
 	a.hide = func() { hidden++ }
 	tt.Key(0, ui.KeyEscape)
-	if a.cfg.AI || hidden != 0 || !tt.Focused("搜索结果") {
+	if hidden != 1 || !a.cfg.AI {
 		t.Errorf("esc: AI %v hidden %d", a.cfg.AI, hidden)
 	}
-	tt.Key(0, ui.KeyEscape)
-	if hidden != 1 {
-		t.Errorf("esc again hid %d", hidden)
+	tt.Key(ui.Shift, ui.KeyTab)
+	if a.cfg.AI || !tt.Focused("搜索结果") {
+		t.Errorf("⇧⇥: AI %v focused %v", a.cfg.AI, tt.Focused("搜索结果"))
 	}
 }
 

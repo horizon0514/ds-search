@@ -87,9 +87,14 @@ func section(c *ui.Context, k ink, title, desc string, body func()) {
 	})
 }
 
-// option is a row with a switch on its right.
+// option is a row with a switch on its right. The whole row toggles: the
+// label is the easy target, the switch is the precise one.
 func option(c *ui.Context, k ink, label, desc string, on *bool, changed func()) {
-	ui.Row(c.Key(label)).Gap(12).Padding(10, 14).Radius(10).BorderWidth(1).BorderColor(k.line).AlignItems(ui.Center).Children(func() {
+	ui.Row(c.Key(label)).Gap(12).Padding(10, 14).Radius(10).BorderWidth(1).BorderColor(k.line).AlignItems(ui.Center).
+		Cursor(ui.CursorPointer).OnClick(func() {
+		*on = !*on
+		changed()
+	}).Children(func() {
 		ui.Column(c).Grow(1).Gap(3).Children(func() {
 			ui.Text(c, label).FontSize(13)
 			if desc != "" {
@@ -119,6 +124,12 @@ func (a *app) message(c *ui.Context, k ink) {
 }
 
 func (a *app) tabGeneral(c *ui.Context, k ink) {
+	section(c, k, "AI 总结", "默认每次搜索都先搜再总结：面板两栏，右边是带 [n] 引用的总结，左边是它读的来源。", func() {
+		on := a.cfg.AI
+		option(c, k, "搜索后自动 AI 总结", "关闭后只显示搜索结果，按 ⇥ 才展开对话（总结也会在那时才开始，不会白花钱）。", &on, func() {
+			a.expand(on) // it saves the config, resizes the panel, and summarizes what is on screen
+		})
+	})
 	section(c, k, "外观", "", func() {
 		translucent := a.cfg.Translucent
 		option(c, k, "半透明背景", "透出桌面的毛玻璃效果。默认关闭：不透明背景在任何壁纸和网页上都更易读。", &translucent, func() {

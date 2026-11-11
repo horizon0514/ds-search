@@ -11,7 +11,7 @@ import (
 // API key is never in it (keystore.go).
 type config struct {
 	Shortcut string `json:"shortcut"`        // global shortcut, e.g. "Alt+Space"
-	AI       bool   `json:"ai"`              // the panel expanded, with ✨ AI 对话
+	AI       bool   `json:"ai"`              // the conversation open on the right: a search summarizes
 	Model    string `json:"model,omitempty"` // chat model
 	// Billing: warn under this balance (¥), and over this month's budget (¥, 0 for none).
 	LowBalance    float64  `json:"lowBalance"`
@@ -36,7 +36,7 @@ const (
 	maxHistory       = 30
 )
 
-func defaultConfig() config { return config{Shortcut: defaultShortcut, LowBalance: 5} }
+func defaultConfig() config { return config{Shortcut: defaultShortcut, LowBalance: 5, AI: true} }
 
 func loadConfig(dir string) config {
 	cfg := defaultConfig()

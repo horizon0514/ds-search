@@ -237,6 +237,7 @@ func TestHistoryDelete(t *testing.T) {
 
 func TestHistoryOff(t *testing.T) {
 	a, _ := testApp(&fake{results: canned})
+	a.cfg.AI = false
 	a.cfg.History = []string{"一"}
 	a.setHistory(false)
 	if len(a.cfg.History) != 0 || !a.cfg.NoHistory {
@@ -259,8 +260,49 @@ func TestHistoryOff(t *testing.T) {
 	}
 }
 
+// The switch in the settings is the other way round for those who want
+// the search alone: off, nothing is asked; on, what is on screen is
+// summarized at once. The whole row is the target, so the label is
+// enough; space on the focused switch does the same (TestSettingsKeyboard).
+func TestSummarySwitch(t *testing.T) {
+	f := &fake{results: canned, answer: []string{"总结"}}
+	a, _ := testApp(f)
+	a.cfg.AI = false
+	tt := ui.NewTester(a.view, panelWidth, panelHeight)
+	tt.Type("go")
+	tt.Key(0, ui.KeyEnter)
+	if len(f.chats) != 0 || tt.HasText("AI 总结") {
+		t.Fatalf("off, yet chats %d pane shown", len(f.chats))
+	}
+	// The row in the settings, then back to the search.
+	toggle := func() {
+		a.openTab(tabGeneral)
+		tt.Frame()
+		if err := tt.Click("搜索后自动 AI 总结"); err != nil {
+			t.Fatal(err)
+		}
+		a.back()
+		tt.Frame()
+	}
+	toggle()
+	if !a.cfg.AI || len(f.chats) != 1 || len(a.turns) != 1 {
+		t.Fatalf("on: AI %v chats %d turns %d", a.cfg.AI, len(f.chats), len(a.turns))
+	}
+	if !tt.HasText("AI 总结") {
+		t.Errorf("no summary after the settings: %q", tt.Texts())
+	}
+	// Off again: the sources alone, and nothing new asked.
+	toggle()
+	if a.cfg.AI || tt.HasText("AI 总结") {
+		t.Errorf("off: AI %v texts %q", a.cfg.AI, tt.Texts())
+	}
+	if len(f.chats) != 1 {
+		t.Errorf("off, yet chats %d", len(f.chats))
+	}
+}
+
 func TestSplit(t *testing.T) {
-	if w := splitWidth(0, 1180); math.Abs(float64(w-500)) > 0.5 {
+	if w := splitWidth(0, 1180); math.Abs(float64(w-430)) > 0.5 {
 		t.Errorf("default: %v", w)
 	}
 	if w := splitWidth(0.1, 1180); w != minLeft {
@@ -292,7 +334,7 @@ func TestSplit(t *testing.T) {
 	}
 	tt.Release(x+120, y)
 	tt.Frame()
-	if l := a.leftWidth(); l < 600 || l > 640 {
+	if l := a.leftWidth(); l < 530 || l > 570 {
 		t.Errorf("dragged 120: left %v (split %v, panes %v)", l, a.cfg.Split, a.panesW)
 	}
 	if saved == 0 {

@@ -14,12 +14,13 @@ import (
 	"github.com/egoist/mygo/ui/markdown"
 )
 
-// The panel: the results alone, or, expanded (⇥), with the AI
-// conversation on their right.
+// The panel: the results beside the AI conversation, which is the
+// default, so a search is read as its summary. With the conversation
+// closed (⇧⇥) the results are all there is.
 const (
 	panelWidth, panelHeight = 720, 560
 	expandedWidth           = 1180
-	leftWidth               = 500 // the results, expanded
+	leftWidth               = 430 // the sources beside the summary
 )
 
 var (
@@ -230,7 +231,9 @@ func (a *app) resultsPane(c *ui.Context, k ink) {
 		ui.Scroll(c.Key("hist")).Grow(1).Padding(8, 10).Gap(2).Children(func() { a.history(c, k) })
 	default:
 		// Near the end, by scrolling or choosing, the rest loads.
-		if a.moreLeft() && a.listScroll.MaxY > 0 && a.listScroll.MaxY-a.listScroll.Y < 150 {
+		// Only once the list has been scrolled: in a short pane the end of
+		// 10 results is in view at once, and that must not ask for 50.
+		if a.moreLeft() && a.listScroll.Y > 0 && a.listScroll.MaxY-a.listScroll.Y < 150 {
 			a.loadMore()
 		}
 		end := 0
@@ -263,22 +266,29 @@ func (a *app) resultsPane(c *ui.Context, k ink) {
 	}
 }
 
-// aiChip opens and closes the AI conversation (⇥).
+// aiChip opens and closes the AI conversation: ⇥ opens it, ⇧⇥ closes it.
 func (a *app) aiChip(c *ui.Context, k ink) {
 	bg, fg := ui.Transparent, k.faint
 	if a.cfg.AI {
 		bg, fg = k.chosen, k.link
 	}
+	// The chip stays called 对话: 总结 is the answer's own heading, which
+	// only shows while this pane is open.
 	ui.Row(c).Gap(4).Padding(4, 9).Radius(20).Background(bg).AlignItems(ui.Center).Cursor(ui.CursorPointer).
-		Tooltip("AI 对话  ⇥").Label("AI 对话").OnClick(a.toggleAI).Children(func() {
+		Tooltip("AI 总结  ⇥ 打开 / ⇧⇥ 收起").Label("AI 对话").OnClick(a.toggleAI).Children(func() {
 		ui.Icon(c, iconSparkles).FontSize(13).TextColor(fg)
 		ui.Text(c, "AI 对话").FontSize(12).FontWeight(550).TextColor(fg)
 	})
 }
 
 // row is a result: the site and its date, the title, the snippet.
+//
+// Beside the summary (dense) a result is a source: numbered like the [n]
+// the answer cites, one line of title, one of site, no snippet. With the
+// conversation closed the list is all there is, and the rows breathe.
 func (a *app) row(c *ui.Context, k ink, i int) {
 	r := a.results[i]
+	dense := a.cfg.AI
 	bg := ui.Transparent
 	if i == a.chosen {
 		bg = k.chosen // the keyboard is on the results: clearly
@@ -286,7 +296,11 @@ func (a *app) row(c *ui.Context, k ink, i int) {
 			bg = k.hover // on the query: subtly
 		}
 	}
-	row := ui.Column(c).Padding(9, 12, 10, 12).Radius(10).Background(bg).Gap(3).Cursor(ui.CursorPointer)
+	pad, gap, rad := float32(9), float32(3), float32(10)
+	if dense {
+		pad, gap, rad = 6, 1, 9
+	}
+	row := ui.Column(c).Padding(pad, 12, pad+1, 12).Radius(rad).Background(bg).Gap(gap).Cursor(ui.CursorPointer)
 	if row.Hovered() && i != a.chosen {
 		row.Background(k.hover)
 	}
@@ -299,6 +313,10 @@ func (a *app) row(c *ui.Context, k ink, i int) {
 	})
 	row.Children(func() {
 		ui.Row(c).Gap(7).AlignItems(ui.Center).Children(func() {
+			if dense {
+				// Its number, so the row and the answer's [n] are one thing.
+				ui.Text(c, fmt.Sprintf("%d.", i+1)).FontSize(11).FontWeight(600).TextColor(k.faint)
+			}
 			site := siteName(r)
 			if b := a.icon(r.SiteIcon); b != nil {
 				ui.Image(c, b).Size(16, 16).Radius(4)
@@ -306,7 +324,9 @@ func (a *app) row(c *ui.Context, k ink, i int) {
 				ui.Avatar(c, site, nil).Size(16, 16).FontSize(9)
 			}
 			ui.Text(c, site).FontSize(12).TextColor(k.muted).SingleLine().Shrink(1)
-			ui.Text(c, host(r.URL)).FontSize(11).TextColor(k.faint).SingleLine().Shrink(2)
+			if !dense {
+				ui.Text(c, host(r.URL)).FontSize(11).TextColor(k.faint).SingleLine().Shrink(2)
+			}
 			if d := when(r, time.Now()); d != "" {
 				ui.Text(c, "· "+d).FontSize(11).TextColor(k.faint).SingleLine()
 			}
@@ -325,8 +345,12 @@ func (a *app) row(c *ui.Context, k ink, i int) {
 				})
 			}
 		})
-		ui.Text(c, oneLine(r.Title)).FontSize(16).FontWeight(500).TextColor(k.link).MaxLines(1)
-		if r.Snippet != "" {
+		size := float32(16)
+		if dense {
+			size = 13.5
+		}
+		ui.Text(c, oneLine(r.Title)).FontSize(size).FontWeight(500).TextColor(k.link).MaxLines(1)
+		if r.Snippet != "" && !dense {
 			ui.Text(c, oneLine(r.Snippet)).FontSize(13).LineHeight(1.45).TextColor(k.muted).MaxLines(2)
 		}
 	})
@@ -404,7 +428,11 @@ func notice(c *ui.Context, k ink, msg string, bad bool) {
 func (a *app) footer(c *ui.Context, k ink) {
 	left := keys(a.cfg.Shortcut) + " 唤起"
 	if len(a.results) > 0 && !a.showingHistory() {
-		left = fmt.Sprintf("%d 条 · %.2f 秒", len(a.results), a.took.Seconds())
+		if a.cfg.AI {
+			left = fmt.Sprintf("%d 条来源 · %.2f 秒", len(a.results), a.took.Seconds())
+		} else {
+			left = fmt.Sprintf("%d 条 · %.2f 秒", len(a.results), a.took.Seconds())
+		}
 	}
 	if a.srcSet > 0 {
 		left = fmt.Sprintf("%s · %d 条来源", a.setLabel(a.srcSet), len(a.results))
@@ -414,14 +442,11 @@ func (a *app) footer(c *ui.Context, k ink) {
 	}
 	var right string
 	esc := "隐藏"
-	if a.cfg.AI {
-		esc = "收起"
-	}
 	switch {
 	case a.cfg.AI && a.chatFocused:
-		right = hint("↵", "追问", "⇥", "结果", cmdKey()+"N", "新对话", "esc", "收起")
+		right = hint("↵", "追问", "⇥", "结果", cmdKey()+"N", "新对话", "esc", esc)
 	case a.listFocused && len(a.results) > 0 && a.cfg.AI:
-		right = hint("↑↓", "选择", "↵", "打开", "空格", "预览", "⇥", "对话", "esc", "收起")
+		right = hint("↑↓", "选择", "↵", "打开", "空格", "预览", "⇥", "对话", "esc", esc)
 	case a.listFocused && len(a.results) > 0:
 		right = hint("↑↓", "选择", "↵", "打开", "空格", "预览", "⇥", "AI", "esc", "隐藏")
 	case a.showingHistory() && len(a.cfg.History) > 0:

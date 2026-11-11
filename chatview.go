@@ -77,6 +77,7 @@ func (a *app) modelName() string {
 // turnView is a turn: the question, the searches it made, the answer.
 func (a *app) turnView(c *ui.Context, k ink, i int) {
 	t := a.turns[i]
+	summary := t.question == "" // the first turn: the search's summary, the panel's headline
 	ui.Column(c).Gap(8).Children(func() {
 		if t.question != "" {
 			ui.Row(c.Key("q")).Justify(ui.End).Children(func() {
@@ -84,7 +85,11 @@ func (a *app) turnView(c *ui.Context, k ink, i int) {
 			})
 		} else {
 			ui.Row(c.Key("q")).Gap(6).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, fmt.Sprintf("总结 · 基于 %d 条最相关结果", len(t.sources))).FontSize(11).TextColor(k.faint)
+				ui.Icon(c, iconSparkles).FontSize(13).TextColor(k.link)
+				ui.Text(c, "AI 总结").FontSize(12).FontWeight(650).TextColor(k.link)
+				if n := len(t.sources); n > 0 {
+					ui.Text(c, fmt.Sprintf("· 基于 %d 条最相关结果", n)).FontSize(11).TextColor(k.faint)
+				}
 			})
 		}
 		for j, s := range t.searches {
@@ -119,7 +124,11 @@ func (a *app) turnView(c *ui.Context, k ink, i int) {
 		}
 		if t.answer != "" {
 			src := citeLinks(t.answer, len(t.sources))
-			t.md.Theme = &markdown.Theme{FontSize: 14, Link: k.link}
+			size := float32(14)
+			if summary { // what the search is for: read first, and largest
+				size = 15.5
+			}
+			t.md.Theme = &markdown.Theme{FontSize: size, LineHeight: 1.6, Link: k.link}
 			if t.busy {
 				markdown.Stream(c.Key("md"), src, &t.md)
 			} else {
@@ -138,11 +147,28 @@ func searching(t *turn) bool {
 	return false
 }
 
-// setChips switch the results on the left between the search's and those
-// each turn searched for.
+// sourcesHead names the left pane what it is beside the summary: the
+// sources. Once a turn has searched, its chips switch the list between
+// the search's sources and each turn's (⌥← ⌥→).
 func (a *app) setChips(c *ui.Context, k ink) {
+	if a.showingHistory() || a.searchErr != "" {
+		return
+	}
 	ss := a.sets()
 	if len(ss) < 2 {
+		if len(a.results) == 0 && !a.searching {
+			return
+		}
+		head := fmt.Sprintf("来源 · %d 条", len(a.results))
+		if a.searching && len(a.all) == 0 {
+			head = "正在搜索…"
+		}
+		ui.Row(c.Key("srcs")).Padding(9, 12, 3, 14).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, head).FontSize(11).FontWeight(600).TextColor(k.faint).Grow(1).SingleLine()
+			if a.searching || a.expanding {
+				ui.Spinner(c).Size(10, 10)
+			}
+		})
 		return
 	}
 	ui.Row(c).Padding(8, 12, 2, 14).Gap(6).Wrap().Children(func() {

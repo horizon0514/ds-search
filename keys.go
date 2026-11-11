@@ -34,15 +34,20 @@ func (a *app) keysSearch(c *ui.Context) {
 	onChat := a.cfg.AI && a.chatInput.Focused(c)
 	onList := a.listFocus.Focused(c) && len(a.results) > 0 && !a.showingHistory()
 	if c.Shortcut(0, ui.KeyEscape) {
-		if a.cfg.AI {
-			a.expand(false) // the conversation closes first; then esc hides
-		} else {
-			a.hide()
-		}
+		// esc always hides the panel: it is called with ⌥Space to be
+		// dismissed, and now the conversation is open by default. ⇧⇥ is
+		// what closes the conversation.
+		a.hide()
 	}
 	if c.Shortcut(ui.Cmd, ui.KeyL) {
 		a.focusQuery = true
 		a.input.Focus()
+	}
+	if c.Shortcut(ui.Shift, ui.KeyTab) {
+		// esc hides the panel, so ⇧⇥ is the keyboard's way back to the
+		// results alone: it closes the conversation (as the ✨ chip does).
+		a.toggleAI()
+		return
 	}
 	if a.cfg.AI && c.Shortcut(ui.Cmd, ui.KeyN) {
 		a.newChat()
@@ -207,24 +212,25 @@ func (a *app) keysReader(c *ui.Context) {
 func shortcutGroups() [][3]string {
 	m := cmdKey()
 	return [][3]string{
-		{"输入框", "↵", "搜索"},
-		{"", "↓", "进入结果列表"},
-		{"结果", "↑ ↓", "选择（滚到底自动加载更多）"},
+		{"输入框", "↵", "搜索，并让 AI 总结（默认自动）"},
+		{"", "↓", "进入来源列表"},
+		{"来源（左侧）", "↑ ↓", "选择（滚到底自动加载更多）"},
 		{"", "↵", "在浏览器打开"},
 		{"", "空格", "预览（阅读模式）"},
-		{"", "⇥", "展开 ✨ AI 对话 / 切到对话"},
+		{"", "⇥", "在来源与对话之间切换（AI 栏关闭时先展开）"},
+		{"", "⇧⇥", "收起 / 展开 ✨ AI 栏"},
 		{"", m + "C", "复制链接"},
 		{"", "直接打字  /  ⌫", "回到输入框改搜索词"},
 		{"", m + "↑  " + m + "↓", "到第一条 / 最后一条"},
 		{"", "⌥←  ⌥→", "切换来源：原始搜索 / 各轮追问搜到的"},
 		{"", m + "1 … " + m + "9", "打开第 N 条"},
-		{"AI 对话", "↵  /  ⇧↵", "发送追问 / 换行"},
-		{"", "⇥", "回到结果列表"},
+		{"AI 对话（右侧）", "↵  /  ⇧↵", "发送追问 / 换行"},
+		{"", "⇥", "回到来源列表"},
 		{"", "↑（输入框为空时）", "取回上一个问题"},
 		{"", m + "1 … " + m + "9", "在左侧选中来源 [N]，再按一次打开"},
 		{"", m + "↵", "打开左侧选中的来源"},
 		{"", m + "N", "新对话（保留搜索结果）"},
-		{"", "esc", "收起对话；再按隐藏面板"},
+		{"", "esc", "隐藏面板（收起 AI 栏用 ⇧⇥）"},
 		{"预览", "↑ ↓  /  空格", "滚动"},
 		{"", "↵", "在浏览器打开原文"},
 		{"", "esc  /  ←", "返回结果"},

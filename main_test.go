@@ -109,12 +109,15 @@ var canned = []dsapi.Result{
 	{Title: "Go 1.27 新特性一览", URL: "https://example.cn/go127", Snippet: "Go 1.27 带来了新的迭代器、泛型改进……", SiteName: "示例博客", RerankScore: 1.1, Authority: 1},
 }
 
-func TestSearchOpenAndAI(t *testing.T) {
+// A search summarizes by default: Enter asks, and the answer arrives on
+// the right over the sources on the left. ⇧⇥ closes that pane, and then a
+// search costs nothing but the search.
+func TestSearchSummarizesByDefault(t *testing.T) {
 	f := &fake{results: canned, answer: []string{"Go 1.27 于 8 月发布", " [1]。"}}
 	a, opened := testApp(f)
 	var expanded []bool
 	a.resize = func(e bool) { expanded = append(expanded, e) }
-	tt := ui.NewTester(a.view, panelWidth, panelHeight)
+	tt := ui.NewTester(a.view, expandedWidth, panelHeight)
 	tt.Type("go 1.27")
 	tt.Key(0, ui.KeyEnter)
 	if len(f.queries) != 1 || !tt.HasText("Go 1.27 Release Notes") {
@@ -123,8 +126,18 @@ func TestSearchOpenAndAI(t *testing.T) {
 	if !tt.HasText("优质") || !tt.HasText("权威") {
 		t.Errorf("no quality badges: %q", tt.Texts())
 	}
-	if len(f.chats) != 0 || len(a.turns) != 0 { // one column: no AI, nothing spent
-		t.Errorf("collapsed, yet chats %d", len(f.chats))
+	// The summary came with the search, and the sources show what it read.
+	if len(f.chats) != 1 || len(a.turns) != 1 || a.turns[0].busy {
+		t.Fatalf("searched without a summary: chats %d turns %d", len(f.chats), len(a.turns))
+	}
+	if a.turns[0].answer != "Go 1.27 于 8 月发布 [1]。" {
+		t.Errorf("answer %q", a.turns[0].answer)
+	}
+	if got := citeLinks(a.turns[0].answer, len(a.turns[0].sources)); !strings.Contains(got, "[[1]](cite:1)") {
+		t.Errorf("citations: %s", got)
+	}
+	if !tt.HasText("AI 总结") || !tt.HasText("来源 · 2 条") {
+		t.Errorf("no summary and source headings: %q", tt.Texts())
 	}
 	tt.Key(0, ui.KeyDown)
 	if a.chosen != 1 {
@@ -134,19 +147,11 @@ func TestSearchOpenAndAI(t *testing.T) {
 	if len(*opened) != 1 || (*opened)[0] != canned[1].URL || len(f.queries) != 1 {
 		t.Errorf("opened %v, queries %v", *opened, f.queries)
 	}
-	// Tab expands: the summary on the right, the keyboard on the follow-up box.
+	// ⇥ is the conversation, ⇥ again the sources, with nothing spent twice.
 	tt.Key(0, ui.KeyTab)
-	tt.SetSize(expandedWidth, panelHeight)
-	if !a.cfg.AI || len(expanded) != 1 || !expanded[0] || !tt.Focused("追问") {
-		t.Fatalf("Tab: AI %v resized %v follow-up focused %v", a.cfg.AI, expanded, tt.Focused("追问"))
+	if !tt.Focused("追问") {
+		t.Fatalf("Tab did not focus the follow-up box")
 	}
-	if len(a.turns) != 1 || a.turns[0].answer != "Go 1.27 于 8 月发布 [1]。" || a.turns[0].busy {
-		t.Fatalf("turns %d", len(a.turns))
-	}
-	if got := citeLinks(a.turns[0].answer, len(a.turns[0].sources)); !strings.Contains(got, "[[1]](cite:1)") {
-		t.Errorf("citations: %s", got)
-	}
-	// Tab again: the results; Tab: back to the conversation.
 	tt.Key(0, ui.KeyTab)
 	if !tt.Focused("搜索结果") {
 		t.Error("Tab in the conversation did not go to the results")
@@ -155,19 +160,26 @@ func TestSearchOpenAndAI(t *testing.T) {
 	if !tt.Focused("追问") || len(f.chats) != 1 {
 		t.Errorf("Tab on the results: follow-up focused %v, chats %d", tt.Focused("追问"), len(f.chats))
 	}
-	// Esc collapses, Esc again hides.
+	// ⇧⇥ closes the conversation: the results are all there is again.
+	tt.Key(ui.Shift, ui.KeyTab)
+	tt.SetSize(panelWidth, panelHeight)
+	if a.cfg.AI || len(expanded) != 1 || expanded[0] {
+		t.Errorf("⇧⇥: AI %v resized %v", a.cfg.AI, expanded)
+	}
+	chats := len(f.chats)
+	tt.Type("2")
+	tt.Key(0, ui.KeyEnter)
+	if len(f.chats) != chats {
+		t.Errorf("searched with the conversation closed, yet chats %d", len(f.chats))
+	}
+	// Esc hides at once: no pane to collapse first.
 	hidden := 0
 	a.hide = func() { hidden++ }
 	tt.Key(0, ui.KeyEscape)
-	if a.cfg.AI || hidden != 0 || expanded[len(expanded)-1] {
-		t.Errorf("esc: AI %v hidden %d", a.cfg.AI, hidden)
-	}
-	tt.SetSize(panelWidth, panelHeight)
-	tt.Key(0, ui.KeyEscape)
 	if hidden != 1 {
-		t.Errorf("second esc hid %d", hidden)
+		t.Errorf("esc hid %d times", hidden)
 	}
-	if a.cfg.History[0] != "go 1.27" {
+	if !slices.Contains(a.cfg.History, "go 1.27") {
 		t.Errorf("history %v", a.cfg.History)
 	}
 }
@@ -226,7 +238,13 @@ func TestScreenshots(t *testing.T) {
 			a.spawn = func(fn func()) { fn() }
 			a.balBusy = true // no real balance in screenshots
 			a.cfg.History = []string{"DeepSeek V4 site:deepseek.com", "Go 1.27 release notes", "杭州 天气 after:2026-10-01", "mygo egoist"}
-			tt := ui.NewTester(a.view, panelWidth, panelHeight)
+			// The panel is as wide as the app opens it: the conversation
+			// is open by default, so most shots are the wide ones.
+			w := panelWidth
+			if a.cfg.AI {
+				w = expandedWidth
+			}
+			tt := ui.NewTester(a.view, w, panelHeight)
 			tt.SetScale(2)
 			tt.SetDark(dark)
 			setup(a, tt)
@@ -256,6 +274,9 @@ func TestScreenshots(t *testing.T) {
 					a.msgs = append(dsapi.FirstMessages(q, tr.sources, "", time.Now()), dsapi.Message{Role: "assistant", Content: cachedAns})
 					a.focusChat = true
 					tt.SetSize(expandedWidth, panelHeight)
+				} else {
+					a.cfg.AI = false
+					tt.SetSize(panelWidth, panelHeight)
 				}
 				tt.Frame()
 				return
@@ -263,8 +284,11 @@ func TestScreenshots(t *testing.T) {
 			tt.Type(q)
 			tt.Key(0, ui.KeyEnter)
 			if ai {
-				tt.Key(0, ui.KeyTab)
+				tt.Key(0, ui.KeyTab) // the keyboard to the follow-up box
 				tt.SetSize(expandedWidth, panelHeight)
+			} else {
+				a.cfg.AI = false
+				tt.SetSize(panelWidth, panelHeight)
 			}
 			if a.searchErr != "" || (ai && a.turns[0].err != "") {
 				t.Fatalf("search %q: %s", q, a.searchErr)
@@ -290,12 +314,38 @@ func TestScreenshots(t *testing.T) {
 	shots("10-follow-up-search", func(a *app, tt *ui.Tester) {
 		search("DeepSeek 搜索 API 怎么收费", true)(a, tt)
 		if followTurn == nil {
-			// The real API: a follow-up the first results can't answer.
-			tt.Type("和智谱、Kimi 的联网搜索 API 比，价格怎么样？")
-			tt.Key(0, ui.KeyEnter)
-			ft := a.turns[len(a.turns)-1]
-			if ft.err != "" || len(ft.searches) == 0 || ft.answer == "" {
-				t.Fatalf("follow-up: err %q searches %d answer %q", ft.err, len(ft.searches), ft.answer)
+			// The real API: a follow-up far outside what a pricing search
+			// returned, so the model has to search again. Whether it does is
+			// its call, so try these in order and keep the first that searched.
+			// Questions about other vendors' prices are not enough: the coverage
+			// articles already answer those, so ask about something off-topic.
+			a.chatInput.Focus() // typed here, not in the query box
+			tt.Frame()
+			if !tt.Focused("追问") {
+				t.Fatalf("the follow-up box is not focused: %q", tt.Texts())
+			}
+			turns, msgs := len(a.turns), len(a.msgs)
+			questions := []string{
+				"换个话题：上海明天天气怎么样？",
+				"DeepSeek V4 什么时候正式发布？",
+			}
+			var ft *turn
+			for _, q := range questions {
+				tt.Type(q)
+				tt.Key(0, ui.KeyEnter)
+				if len(a.turns) != turns+1 {
+					t.Fatalf("the follow-up did not add a turn: turns %d", len(a.turns))
+				}
+				ft = a.turns[len(a.turns)-1]
+				if ft.err == "" && len(ft.searches) > 0 && ft.answer != "" {
+					break
+				}
+				t.Logf("no new search for %q (err %q), undoing the turn", q, ft.err)
+				a.turns, a.msgs = a.turns[:turns], a.msgs[:msgs]
+				ft = nil
+			}
+			if ft == nil {
+				t.Fatal("no follow-up made the model search again")
 			}
 			for _, s := range ft.searches {
 				t.Logf("又搜了：%s · %d 条", s.query, s.n)
@@ -772,14 +822,14 @@ func TestKeyRouting(t *testing.T) {
 	if a.query != "新" {
 		t.Errorf("⌘L then typing: %q", a.query)
 	}
-	// Tab from the field opens the conversation; esc closes it.
+	// Tab from the field opens the conversation; ⇧⇥ closes it, esc hides.
 	tt.Key(0, ui.KeyTab)
 	if !a.cfg.AI || !tt.Focused("追问") {
 		t.Errorf("Tab: AI %v", a.cfg.AI)
 	}
-	tt.Key(0, ui.KeyEscape)
+	tt.Key(ui.Shift, ui.KeyTab)
 	if a.cfg.AI {
-		t.Error("esc did not collapse")
+		t.Error("⇧⇥ did not collapse the conversation")
 	}
 	tt.Key(ui.Cmd, ui.KeySlash)
 	if !a.cheat || !tt.HasText("键盘快捷键") {

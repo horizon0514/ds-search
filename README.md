@@ -1,6 +1,6 @@
 # DS 搜索（DS Search）
 
-macOS 菜单栏里的极简个人搜索：基于 [DeepSeek](https://platform.deepseek.com) 的 Search / Fetch / Chat API，纯 Go + [MyGo](https://github.com/egoist/mygo) 原生 UI（GPU 绘制，没有 WebView）。⌥空格 唤起，打字，回车，结果就在眼前；按 ⇥ 展开 AI 对话，还能联网追问。
+macOS 菜单栏里的极简个人搜索：基于 [DeepSeek](https://platform.deepseek.com) 的 Search / Fetch / Chat API，纯 Go + [MyGo](https://github.com/egoist/mygo) 原生 UI（GPU 绘制，没有 WebView）。⌥空格 唤起，打字，回车：先搜，再总结，右边是带 [n] 引用的 AI 总结，左边是它读的来源；按 ⇧⇥ 收起 AI 栏只看结果，还能联网追问。
 
 > 非 DeepSeek 官方产品，与 DeepSeek（杭州深度求索）无任何关联。需要你自己的 DeepSeek API Key，费用由你的 DeepSeek 账户承担。
 
@@ -22,7 +22,7 @@ macOS 菜单栏里的极简个人搜索：基于 [DeepSeek](https://platform.dee
 - **菜单栏常驻**，无 Dock 图标；全局快捷键 **⌥空格**（可改）唤起 Spotlight 式浮动面板，全键盘操作，支持中文输入法。
 - **网页搜索**：DeepSeek Search API，支持 `site:`、`-site:`、`"精确短语"`、`lang:`、`after:`、`before:`；无限滚动（先取 10 条，滚到底再取到 50 条）；站点图标、日期、「优质 / 权威」标记。
 - **阅读模式**：空格预览网页正文（DeepSeek Fetch API）。
-- **AI 对话**：⇥ 展开右栏，对前 10 条结果做带 [n] 引用的总结；可多轮追问，模型觉得来源不够时会自己再搜（Function Calling，每轮最多 2 次），点 [n] 在左侧定位来源。
+- **AI 总结（默认）**：每次搜索默认先搜再总结，右栏对前 10 条结果做带 [n] 引用的总结，左栏是它读的来源；⇧⇥ 收起 AI 栏只看结果，设置 › 通用 可默认关掉（关掉后按 ⇥ 展开对话时才开始总结）。可多轮追问，模型觉得来源不够时会自己再搜（Function Calling，每轮最多 2 次），点 [n] 在左侧定位来源。
 - **用量与费用**：本机估算今日 / 本月 / 累计花费、近 30 天柱状图、账户余额、低余额和月度预算提醒。
 - **原生体验**：浅色 / 深色、可拖动分栏与面板尺寸（都会记住）、可选半透明背景、搜索历史可逐条删除或关闭。
 
@@ -66,23 +66,24 @@ DS 搜索不提供任何服务端，所有请求都用你自己的 DeepSeek API 
 
 ## 使用与快捷键
 
-像 Spotlight 一样用：⌥空格 唤出，打字，↵ 搜索；结果出来后键盘自动落在结果列表上。
+像 Spotlight 一样用：⌥空格 唤出，打字，↵ 搜索并自动 AI 总结。搜索结果先出来（左侧），紧跟上是 AI 总结（右侧）；键盘默认落在来源列表上，直接打字就能改搜索词。
 
 | 分类 | 按键 | 作用 |
 |---|---|---|
-| 输入框 | ↵ | 搜索 |
-|  | ↓ | 进入结果列表 |
-| 结果 | ↑ ↓ | 选择（滚到底自动加载更多） |
+| 输入框 | ↵ | 搜索，并让 AI 总结（默认自动） |
+|  | ↓ | 进入来源列表 |
+| 来源（左侧） | ↑ ↓ | 选择（滚到底自动加载更多） |
 |  | ↵ | 在浏览器打开 |
 |  | 空格 | 预览（阅读模式） |
-|  | ⇥ | 展开右侧 ✨ AI 对话（已展开时切到对话） |
+|  | ⇥ | 在来源与对话之间切换（AI 栏关闭时先展开） |
+|  | ⇧⇥ | 收起 / 展开 ✨ AI 栏 |
 |  | ⌘C | 复制链接 |
 |  | 直接打字 / ⌫ | 回到输入框改搜索词（支持中文输入法） |
 |  | ⌘↑ ⌘↓ | 到第一条 / 最后一条 |
-| AI 对话 | ↵ / ⇧↵ | 发送追问 / 换行 |
-|  | ⇥ | 回到左侧结果 |
+| AI 对话（右侧） | ↵ / ⇧↵ | 发送追问 / 换行 |
+|  | ⇥ | 回到来源列表 |
 |  | ⌘N | 新对话（清空对话，保留搜索结果） |
-|  | esc | 收起对话（再按一次隐藏面板） |
+|  | esc | 隐藏面板（收起 AI 栏用 ⇧⇥） |
 | 预览 | ↑ ↓ / 空格 | 滚动 |
 |  | ↵ | 在浏览器打开原文 |
 |  | esc / ← | 返回结果 |
@@ -96,9 +97,10 @@ DS 搜索不提供任何服务端，所有请求都用你自己的 DeepSeek API 
 
 - 搜索语法原样传给 DeepSeek：`site:github.com`、`-site:x.com`、`"精确短语"`、`-广告`、`lang:zh,en`、`after:2026-01-01`、`before:2026`。
 - 无限滚动：第一次搜索只取 10 条（快）；滚到离底部约 150px，或用 ↓ 选到倒数第 2 条时，用同一个搜索词再请求一次 50 条（DeepSeek 搜索没有 offset 参数，最多 50 条），按 URL 去重后追加到下面，滚动位置和选中项不变。加载时底部显示「加载中…」，加载完显示「已显示全部 N 条」；失败显示「加载失败，↵ 重试」。每个搜索词最多多请求这一次。
-- 结果显示：站点图标、站点名、域名、日期（北京时间）、标题、摘要；`rerank_score ≥ 1.5` 标「优质」，`authority ≥ 3` 标「权威」。
-- 两种布局：默认单栏，只有结果。按 ⇥ 面板向右展开（约 720 → 1180 px，居中，小屏自动收窄），左边是结果，右边是 ✨ AI 对话；esc 收起。展开状态会记住。
-- AI 对话：第一条回答是对前 10 条结果中 rerank_score 最高者的总结，带 [n] 角标。之后可以在右下角追问（多轮，deepseek-flash 非思考模式，流式）。
+- 结果显示：站点图标、站点名、日期（北京时间）、标题、「优质 / 权威」标记（`rerank_score ≥ 1.5` 标「优质」，`authority ≥ 3` 标「权威」）；选中那条出现「预览」（空格读全文）。AI 栏展开时来源是一行一条，行首编号与总结里的 [n] 一一对应，不显示域名和摘要，把版面让给总结；关掉 AI 栏时是完整行（另有域名与两行摘要）。
+- 两种布局：默认两栏（约 1180 px，居中，小屏自动收窄），右边是 ✨ AI 总结，左边是带编号的来源（430 px）。按 ⇧⇥ 收起 AI 栏，面板回到单栏（约 720 px），只剩结果；再按 ⇧⇥、按 ⇥ 或设置 › 通用 的「搜索后自动 AI 总结」可展开。展开状态会记住。
+- AI 总结：第一条回答是对前 10 条结果中 rerank_score 最高者的总结，带 [n] 角标；来源行前的编号与 [n] 一一对应。之后可以在右下角追问（多轮，deepseek-flash 非思考模式，流式）。
+- 费用：关闭「搜索后自动 AI 总结」后，搜索不会调用 Chat API，只有按 ⇥ 展开时才总结，不会白花钱。
 - 联网追问：模型带一个 `web_search(query, count?)` 工具（DeepSeek Function Calling，流式），自己判断已有来源够不够；不够就再搜，每轮最多 2 次，对话里会显示「又搜了：xxx · N 条」。这一轮的 [n] 对应这一轮搜到的来源（从 [1] 编号，第二次搜接着编号）；没搜的轮次沿用上一份来源的编号。
 - 来源切换：某一轮搜了，左侧列表就切到那一轮的来源；顶部的小标签（「原始搜索」「第2轮：xxx」…）可以来回切。点回答里的 [n] 会在左侧选中那条来源，再点一次在浏览器打开。
 - 对话只在内存里：新搜索或 ⌘N 会清空，并取消进行中的回答和搜索。
@@ -111,6 +113,8 @@ DS 搜索不提供任何服务端，所有请求都用你自己的 DeepSeek API 
 ## 设置
 
 左侧分页：通用 / API Key / 用量与费用 / 快捷键 / 关于（⌘1–⌘5 切换，⌘, 打开，⌘U 直达用量）。
+
+通用 的第一项是「搜索后自动 AI 总结」（默认开）。关掉它，回车只搜索、不调用 Chat API，按 ⇥ 展开对话时才开始总结；展开时结果已经在屏上，会立即补一次总结。
 
 ## 用量与费用（设置 › 用量与费用，⌘U，或菜单栏）
 
@@ -169,8 +173,8 @@ DEEPSEEK_API_KEY=sk-... go test ./...          # 加上真实 API 测试（会�
 
 **DS Search** is a tiny macOS menu-bar search app built on the [DeepSeek](https://platform.deepseek.com) Search, Fetch and Chat APIs, with a native GPU-rendered UI in pure Go via [MyGo](https://github.com/egoist/mygo) (no WebView).
 
-- Press **⌥Space** for a Spotlight-style panel; type, hit Enter, and browse results with the keyboard. Infinite scroll, site icons, reader mode (Space).
-- Press **Tab** to open an AI chat pane: a cited summary of the top results, follow-up questions, and agentic web search when the sources aren't enough.
+- Press **⌥Space** for a Spotlight-style panel; type, hit **Enter**: it searches, then the AI summarizes. The answer with its [n] citations is the headline on the right, the web results become the **sources** on the left. **Shift+Tab** drops back to results-only search, **Esc** hides the panel. Infinite scroll, site icons, reader mode (Space).
+- **Tab** moves between the sources and the conversation: follow-up questions, and agentic web search when the model thinks the sources aren't enough. Summarizing is on by default; Settings → General turns it off, and then a search costs nothing but the search.
 - Usage & cost estimates, balance and budget alerts; light/dark themes; resizable panes.
 - **Bring your own DeepSeek API key.** Search/Fetch cost ¥0.005 per successful request; chat is billed by tokens on your own DeepSeek account.
 - **Privacy:** the key is stored in the macOS login keychain (or an optional 0600 file); no telemetry and no server of our own. API calls go only to `api.deepseek.com`; result favicons load from the result sites.
