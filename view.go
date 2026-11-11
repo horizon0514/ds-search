@@ -20,7 +20,7 @@ import (
 const (
 	panelWidth, panelHeight = 720, 560
 	expandedWidth           = 1180
-	leftWidth               = 430 // the sources beside the summary
+	leftWidth               = 400 // the sources, a sidebar beside the summary
 )
 
 var (
@@ -35,7 +35,7 @@ var (
 
 // ink is the app's palette for the window's theme.
 type ink struct {
-	bg, text, muted, faint, accent, link, line, hover, chosen, gold, green, card, danger ui.Color
+	bg, side, text, muted, faint, accent, link, line, hover, chosen, gold, green, card, danger ui.Color
 }
 
 // colors are the palette's opaque colors, by name; every text color is
@@ -57,10 +57,12 @@ func palette(c *ui.Context) ink {
 		k.hover = ui.RGB(255, 255, 255).Alpha(0.05)
 		k.chosen = k.link.Alpha(0.16)
 		k.card = ui.RGB(255, 255, 255).Alpha(0.045)
+		k.side = ui.RGB(255, 255, 255).Alpha(0.035)
 	} else {
 		k.hover = ui.RGB(0, 0, 0).Alpha(0.04)
 		k.chosen = k.link.Alpha(0.09)
 		k.card = ui.Hex("#f4f5f7")
+		k.side = ui.RGB(0, 0, 0).Alpha(0.022)
 	}
 	return k
 }
@@ -157,7 +159,9 @@ func (a *app) searchPage(c *ui.Context, k ink) {
 				a.panesW = w
 			}
 			panes.Children(func() {
-				ui.Column(c.Key("left")).Width(a.leftWidth()).MinHeight(0).Children(func() {
+				// The sources are a sidebar: the tint sets them apart from
+				// the summary, which is the panel's main area.
+				ui.Column(c.Key("left")).Width(a.leftWidth()).MinHeight(0).Background(k.side).Children(func() {
 					a.setChips(c.Key("chips"), k)
 					a.resultsPane(c, k)
 				})
@@ -172,8 +176,13 @@ func (a *app) searchPage(c *ui.Context, k ink) {
 	})
 }
 
-// The left pane is at least minLeft wide, the right at least minRight.
-const minLeft, minRight = 300, 340
+// The sources sidebar is at least minLeft and at most maxLeft wide, the
+// summary at least minRight. The cap is what keeps the summary the
+// headline: a share dragged (or remembered) long ago, back when the
+// results were all there was, must not eat the answer's column.
+const (
+	minLeft, maxLeft, minRight = 280, 460, 340
+)
 
 // splitWidth is the left pane's width, of panes w wide, at split (the
 // left's share; 0 for the default).
@@ -184,7 +193,10 @@ func splitWidth(split, w float32) float32 {
 	if split <= 0 {
 		split = float32(leftWidth) / expandedWidth
 	}
-	return max(min(split*w, w-minRight), min(minLeft, w/2))
+	// The summary keeps its column: the sidebar is capped at maxLeft, and on
+	// a panel too narrow for both minimums the two share it out.
+	lo, hi := min(minLeft, w/2), max(min(minLeft, w/2), min(maxLeft, w-minRight))
+	return min(max(min(split*w, w-minRight), lo), hi)
 }
 
 func (a *app) leftWidth() float32 {
@@ -301,7 +313,8 @@ func (a *app) row(c *ui.Context, k ink, i int) {
 		pad, gap, rad = 6, 1, 9
 	}
 	row := ui.Column(c).Padding(pad, 12, pad+1, 12).Radius(rad).Background(bg).Gap(gap).Cursor(ui.CursorPointer)
-	if row.Hovered() && i != a.chosen {
+	hover := row.Hovered()
+	if hover && i != a.chosen {
 		row.Background(k.hover)
 	}
 	row.OnClick(func() {
@@ -319,9 +332,17 @@ func (a *app) row(c *ui.Context, k ink, i int) {
 			}
 			site := siteName(r)
 			if b := a.icon(r.SiteIcon); b != nil {
-				ui.Image(c, b).Size(16, 16).Radius(4)
+				size := float32(16)
+				if dense {
+					size = 13 // a source line: the icon supports it, it does not lead it
+				}
+				ui.Image(c, b).Size(size, size).Radius(4)
 			} else {
-				ui.Avatar(c, site, nil).Size(16, 16).FontSize(9)
+				size := float32(16)
+				if dense {
+					size = 13
+				}
+				ui.Avatar(c, site, nil).Size(size, size).FontSize(9)
 			}
 			ui.Text(c, site).FontSize(12).TextColor(k.muted).SingleLine().Shrink(1)
 			if !dense {
@@ -331,11 +352,15 @@ func (a *app) row(c *ui.Context, k ink, i int) {
 				ui.Text(c, "· "+d).FontSize(11).TextColor(k.faint).SingleLine()
 			}
 			ui.Spacer(c)
-			if r.Authoritative() {
-				badge(c, "权威", k.green)
-			}
-			if r.Good() {
-				badge(c, "优质", k.gold)
+			// Beside the summary only the row being read says what it is
+			// worth: ten colored badges would outshout the answer.
+			if !dense || i == a.chosen || hover {
+				if r.Authoritative() {
+					badge(c, "权威", k.green)
+				}
+				if r.Good() {
+					badge(c, "优质", k.gold)
+				}
 			}
 			if i == a.chosen {
 				ui.Row(c.Key("read")).Gap(4).Padding(2, 7).Radius(6).AlignItems(ui.Center).Cursor(ui.CursorPointer).
@@ -345,11 +370,13 @@ func (a *app) row(c *ui.Context, k ink, i int) {
 				})
 			}
 		})
-		size := float32(16)
+		// A result is a link, so its title is blue. A source is evidence
+		// for the answer above it, so its title is plain ink, smaller.
+		size, col, weight := float32(16), k.link, 500
 		if dense {
-			size = 13.5
+			size, col, weight = 13, k.text, 450
 		}
-		ui.Text(c, oneLine(r.Title)).FontSize(size).FontWeight(500).TextColor(k.link).MaxLines(1)
+		ui.Text(c, oneLine(r.Title)).FontSize(size).FontWeight(weight).TextColor(col).MaxLines(1)
 		if r.Snippet != "" && !dense {
 			ui.Text(c, oneLine(r.Snippet)).FontSize(13).LineHeight(1.45).TextColor(k.muted).MaxLines(2)
 		}

@@ -84,9 +84,9 @@ func (a *app) turnView(c *ui.Context, k ink, i int) {
 				ui.Text(c, t.question).FontSize(14).Padding(7, 12).Radius(12).Background(k.chosen).MaxWidth(520)
 			})
 		} else {
-			ui.Row(c.Key("q")).Gap(6).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, iconSparkles).FontSize(13).TextColor(k.link)
-				ui.Text(c, "AI 总结").FontSize(12).FontWeight(650).TextColor(k.link)
+			ui.Row(c.Key("q")).Gap(7).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, iconSparkles).FontSize(15).TextColor(k.link)
+				ui.Text(c, "AI 总结").FontSize(14).FontWeight(700).TextColor(k.link)
 				if n := len(t.sources); n > 0 {
 					ui.Text(c, fmt.Sprintf("· 基于 %d 条最相关结果", n)).FontSize(11).TextColor(k.faint)
 				}
@@ -126,7 +126,7 @@ func (a *app) turnView(c *ui.Context, k ink, i int) {
 			src := citeLinks(t.answer, len(t.sources))
 			size := float32(14)
 			if summary { // what the search is for: read first, and largest
-				size = 15.5
+				size = 16
 			}
 			t.md.Theme = &markdown.Theme{FontSize: size, LineHeight: 1.6, Link: k.link}
 			if t.busy {
